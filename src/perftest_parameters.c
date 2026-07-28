@@ -495,6 +495,18 @@ static void usage(const char *argv0, VerbType verb, TestType tst, int connection
 	printf("      --out_json_file=<file> ");
 	printf(" Name of the report json file. (Default: %s in the working directory) \n",DEFAULT_JSON_FILE_NAME);
 
+	printf("      --report-per-qp ");
+	printf(" Record a per-QP bandwidth time series (bw tests, client side) \n");
+
+	printf("      --report-interval-us=<us> ");
+	printf(" Bin width for --report-per-qp. 0 (default) records one entry per completion, letting the bin width be chosen offline \n");
+
+	printf("      --report-csv=<file> ");
+	printf(" Where --report-per-qp writes. (Default: %s in the working directory) \n",DEF_CSV_FILE_NAME);
+
+	printf("      --report-trace-mb=<MB> ");
+	printf(" Memory preallocated for --report-per-qp. (Default: %d) \n",DEF_TRACE_MB);
+
 	printf("      --cpu_util ");
 	printf(" Show CPU Utilization in report, valid only in Duration mode \n");
 
@@ -978,6 +990,10 @@ static void init_perftest_params(struct perftest_parameters *user_param)
 	user_param->cpu_util			= 0;
 	user_param->out_json			= 0;
 	user_param->out_json_file_name = strdup(DEFAULT_JSON_FILE_NAME);
+	user_param->report_per_qp		= 0;
+	user_param->report_interval_us		= 0;
+	user_param->report_trace_mb		= DEF_TRACE_MB;
+	user_param->report_csv_file_name	= strdup(DEF_CSV_FILE_NAME);
 	user_param->cpu_util_data.enable	= 0;
 	user_param->retry_count			= DEF_RETRY_COUNT;
 	user_param->dont_xchg_versions		= 0;
@@ -1641,6 +1657,43 @@ static void force_dependecies(struct perftest_parameters *user_param)
 		if (user_param->noPeak == OFF)
 			printf(" WARNING: BW peak won't be measured in this run.\n");
 		user_param->noPeak = ON;
+	}
+
+	/* Per-QP tracing dependencies (perftest_qptrace.h). Everything that can
+	 * only be judged against the achieved rate - above all whether a bin
+	 * holds enough completions to be a curve rather than quantisation
+	 * noise - is checked at dump time instead of guessed at here. */
+	if (user_param->report_per_qp) {
+		if (user_param->tst != BW) {
+			printf(RESULT_LINE);
+			fprintf(stderr," --report-per-qp exists only in BW tests.\n");
+			exit(1);
+		}
+		if (user_param->test_method == RUN_ALL) {
+			printf(RESULT_LINE);
+			fprintf(stderr," --report-per-qp cannot be combined with -a:"
+					" the bw loop runs once per size and only one"
+					" trace can be held at a time.\n");
+			exit(1);
+		}
+		if (user_param->test_method == RUN_INFINITELY) {
+			printf(RESULT_LINE);
+			fprintf(stderr," --report-per-qp does not support --run_infinitely"
+					" (the trace is written when the run ends).\n");
+			exit(1);
+		}
+		if (user_param->cq_mod > 1) {
+			printf(RESULT_LINE);
+			printf(" WARNING: --report-per-qp with cq_mod=%d: the per-QP"
+					" counter advances in steps of %d messages (%lu bytes),"
+					" so that is the finest resolution the trace can have.\n",
+					user_param->cq_mod, user_param->cq_mod,
+					(unsigned long)user_param->cq_mod * user_param->size);
+			printf(" WARNING: cq_mod is only auto-disabled for size > %d,"
+					" so small messages keep the default of %d."
+					" Pass -Q 1 if you want per-message resolution.\n",
+					MSG_SIZE_CQ_MOD_LIMIT, DEF_CQ_MOD);
+		}
 	}
 
 	/* Run infinitely dependencies */
@@ -2614,6 +2667,10 @@ int parser(struct perftest_parameters *user_param,char *argv[], int argc)
 	static int cpu_util_flag = 0;
 	static int out_json_flag = 0;
 	static int out_json_file_flag = 0;
+	static int report_per_qp_flag = 0;
+	static int report_interval_us_flag = 0;
+	static int report_trace_mb_flag = 0;
+	static int report_csv_file_flag = 0;
 	static int latency_gap_flag = 0;
 	static int flow_label_flag = 0;
 	static int retry_count_flag = 0;
@@ -2834,6 +2891,10 @@ int parser(struct perftest_parameters *user_param,char *argv[], int argc)
 			{ .name = "raw_ipv6",		.has_arg = 0, .flag = &raw_ipv6_flag, .val = 1},
 			#endif
 			{.name = "report-per-port", .has_arg = 0, .flag = &report_per_port_flag, .val = 1},
+			{.name = "report-per-qp", .has_arg = 0, .flag = &report_per_qp_flag, .val = 1},
+			{.name = "report-interval-us", .has_arg = 1, .flag = &report_interval_us_flag, .val = 1},
+			{.name = "report-trace-mb", .has_arg = 1, .flag = &report_trace_mb_flag, .val = 1},
+			{.name = "report-csv", .has_arg = 1, .flag = &report_csv_file_flag, .val = 1},
 			{.name = "odp", .has_arg = 0, .flag = &odp_flag, .val = 1},
 			{.name = "use_hugepages", .has_arg = 0, .flag = &hugepages_flag, .val = 1},
 			{.name = "use_old_post_send", .has_arg = 0, .flag = &old_post_send_flag, .val = 1},
@@ -3474,6 +3535,18 @@ int parser(struct perftest_parameters *user_param,char *argv[], int argc)
 					user_param->out_json_file_name = strdup(optarg);
 					out_json_file_flag = 0;
 				}
+				if (report_csv_file_flag) {
+					user_param->report_csv_file_name = strdup(optarg);
+					report_csv_file_flag = 0;
+				}
+				if (report_interval_us_flag) {
+					CHECK_VALUE_NON_NEGATIVE(user_param->report_interval_us,int,"Report interval (us)",not_int_ptr);
+					report_interval_us_flag = 0;
+				}
+				if (report_trace_mb_flag) {
+					CHECK_VALUE_POSITIVE(user_param->report_trace_mb,int,"Trace buffer (MB)",not_int_ptr);
+					report_trace_mb_flag = 0;
+				}
 				if (mmap_offset_flag) {
 					CHECK_VALUE(user_param->mmap_offset,unsigned long,"mmap offset",not_int_ptr);
 					mmap_offset_flag = 0;
@@ -3779,6 +3852,10 @@ int parser(struct perftest_parameters *user_param,char *argv[], int argc)
 
 	if (report_per_port_flag) {
 		user_param->report_per_port = 1;
+	}
+
+	if (report_per_qp_flag) {
+		user_param->report_per_qp = 1;
 	}
 
 	if (ipv6_flag) {

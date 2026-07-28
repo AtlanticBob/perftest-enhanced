@@ -126,6 +126,12 @@
 #define RATE_VALUES_COUNT (22)
 #define DISABLED_CQ_MOD_VALUE    (1)
 #define MSG_SIZE_CQ_MOD_LIMIT (8192)
+/* per-QP tracing (perftest_qptrace.h) */
+#define DEF_TRACE_MB (256)
+#define DEF_CSV_FILE_NAME "perftest_qptrace.csv"
+/* below this many completions per bin the per-QP series is quantisation
+ * noise rather than a curve; warn instead of emitting a plausible fake */
+#define QPTRACE_MIN_EVENTS_PER_BIN (10)
 
 /* Optimal Values for Inline */
 #define DEF_INLINE_WRITE (220)
@@ -641,6 +647,11 @@ struct perftest_parameters {
 	int 				cpu_util;
 	int 				out_json;
 	char				*out_json_file_name;
+	/* per-QP bandwidth tracing, see perftest_qptrace.h */
+	int				report_per_qp;
+	int				report_interval_us;
+	int				report_trace_mb;
+	char				*report_csv_file_name;
 	struct cpu_util_data 		cpu_util_data;
 	int 				latency_gap;
 	int*  				flow_label;

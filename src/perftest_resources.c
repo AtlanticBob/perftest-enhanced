@@ -28,6 +28,7 @@
 #endif
 
 #include "perftest_resources.h"
+#include "perftest_qptrace.h"
 #include "raw_ethernet_resources.h"
 
 static enum ibv_wr_opcode opcode_verbs_array[] = {IBV_WR_SEND,IBV_WR_SEND_WITH_IMM,IBV_WR_RDMA_WRITE,IBV_WR_RDMA_WRITE_WITH_IMM,IBV_WR_RDMA_READ};
@@ -4105,9 +4106,18 @@ int run_iter_bw(struct pingpong_context *ctx,struct perftest_parameters *user_pa
 
 	gap_deadline = get_cycles();
 
+	/* After the duration alarm above, so t0 is the alarm origin and the
+	 * parser can locate perftest's own [margin, duration - margin] window. */
+	if (qptrace_init(ctx, user_param, num_of_qps) == FAILURE) {
+		return_value = FAILURE;
+		goto cleaning;
+	}
+
 	/* main loop for posting */
 	while (totscnt < tot_iters  || totccnt < tot_iters ||
 		(user_param->test_type == DURATION && user_param->state != END_STATE) ) {
+
+		qptrace_tick(ctx->ccnt);
 
 		/* main loop to run over all the qps and post each time n messages */
 		for (index =0 ; index < num_of_qps ; index++) {
@@ -4225,6 +4235,7 @@ int run_iter_bw(struct pingpong_context *ctx,struct perftest_parameters *user_pa
 						}
 						ctx->ccnt[qp_index] += fill;
 						totccnt += fill;
+						qptrace_event(qp_index, fill);
 
 						if (user_param->noPeak == OFF) {
 							if (totccnt > tot_iters)
@@ -4252,6 +4263,7 @@ int run_iter_bw(struct pingpong_context *ctx,struct perftest_parameters *user_pa
 		user_param->tcompleted[0] = get_cycles();
 
 cleaning:
+	qptrace_dump();
 	free(dyn_ctx);
 	free(wc);
 	return return_value;
