@@ -1,4 +1,8 @@
 /*
+ * Modified 2026 by the perftest-enhanced contributors: added the fields backing the options above.
+ * Changes are additive; see README.md and the project history.
+ */
+/*
  * Copyright (c) 2009 Mellanox Technologies Ltd.  All rights reserved.
  *
  * This software is available to you under a choice of one of two

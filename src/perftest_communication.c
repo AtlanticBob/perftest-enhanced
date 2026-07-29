@@ -1,3 +1,7 @@
+/*
+ * Modified 2026 by the perftest-enhanced contributors: made the per-QP address printing suppressible.
+ * Changes are additive; see README.md and the project history.
+ */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

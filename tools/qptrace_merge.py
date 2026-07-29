@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 perftest-enhanced contributors.  All rights reserved.
+# SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause
+#
+# Dual licensed under GPL v2 or the OpenIB.org BSD license; see COPYING in
+# the main directory of this source tree.
 """Put several traces on one time axis.
 
 The lab's real experiments run one perftest process per VF, so a run that is

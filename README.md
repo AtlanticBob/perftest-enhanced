@@ -10,6 +10,8 @@ The baseline commit `5a928eb` is pristine upstream, so `git diff 5a928eb`
 shows the entire change. The patch is client-side only, so an unpatched
 perftest of the same version works as the server.
 
+Upstream: <https://github.com/linux-rdma/perftest>, tag v6.28.
+
 ## What is added
 
 **Per-QP bandwidth over time.** Upstream reports one bandwidth number per
@@ -85,6 +87,16 @@ run a test.
 | `qpstat.py` | per-QP retransmit and error counters, sampled alongside a run |
 | `selfcheck.sh` | check this build still behaves, on a loopback pair |
 | `qpscale.c` | micro-benchmark for QP setup parallelism |
+
+## License
+
+perftest is dual licensed under **GPL v2** or the **OpenIB.org BSD license**,
+and this build keeps that: see `COPYING`, which is upstream's unchanged. You
+may use either license, as with upstream.
+
+Upstream files carry their original copyright notices. The four files
+modified here say so at the top; new files under `src/` and `tools/` carry
+the same dual-license notice.
 
 ## Known Issues
 

@@ -1,3 +1,7 @@
+/*
+ * Modified 2026 by the perftest-enhanced contributors: added per-QP bandwidth tracing hooks and threaded the per-QP QP create/connect/destroy loops.
+ * Changes are additive; see README.md and the project history.
+ */
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>

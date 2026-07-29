@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 perftest-enhanced contributors.  All rights reserved.
+# SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause
+#
+# Dual licensed under GPL v2 or the OpenIB.org BSD license; see COPYING in
+# the main directory of this source tree.
 # Verify the fork still does what it claims, on a loopback pair.
 #
 # This exists because the fork is being archived: the next person to touch

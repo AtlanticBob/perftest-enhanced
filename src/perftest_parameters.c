@@ -1,3 +1,7 @@
+/*
+ * Modified 2026 by the perftest-enhanced contributors: added the --report-per-qp, --no-addr-info and --setup-threads options.
+ * Changes are additive; see README.md and the project history.
+ */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
