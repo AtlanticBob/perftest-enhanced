@@ -66,26 +66,40 @@ tools/qptrace_parse.py run.csv --window-us 100000 --step-us 5000 --out rate.csv
 
 ## `--setup-threads=<n>` — large QP counts
 
-perftest creates and connects its QPs one at a time. At 16384 QPs that is
-about **50 seconds** before a single byte moves. The work is not
-hardware-serialised, so this fork runs both per-QP setup loops across a
-thread pool. **Default 8; `--setup-threads=1` restores the old behaviour.**
+perftest creates, connects and destroys its QPs one at a time. At 16384 QPs
+that is about **50 seconds** of a run in which only 3 seconds carry traffic.
+None of that work is hardware-serialised, so this fork runs all three
+per-QP loops across a thread pool. **Default 8; `--setup-threads=1` restores
+the old behaviour.**
 
-Measured on mlx5, 16384 QPs, one process:
+Measured on mlx5, 16384 QPs, `-D 3`, one process, wall clock:
 
-| | setup |
+| | total run |
 |---|---|
-| `--setup-threads=1` | 49.9 s |
-| `--setup-threads=8` (default) | **29.5 s** |
+| `--setup-threads=1` | 52.4 s |
+| `--setup-threads=8` (default) | **21.7 s** |
 
-The threaded part itself scales 6.1x (24.75 s to 4.08 s for
-create + INIT + RTR + RTS; `tools/qpscale.c` is that measurement, kept as
-the regression check). Overall it is 1.7x because the other half of
-perftest's setup is elsewhere and not yet attacked.
+Where that time goes, at 16384 QPs:
 
-Thread count plateaus at ~6.4x past 8 threads, which is why 8 is the
-default rather than the core count. QP counts below 8, XRC and DC keep the
-serial path — XRC/DC carry state across loop iterations.
+| phase | serial | threaded |
+|---|---|---|
+| create + INIT + connect | 32.3 s | 13.1 s |
+| traffic (`-D 3`) | 3.2 s | 3.2 s |
+| **destroy** | **17.4 s** | **5.6 s** |
+
+Destroy is worth calling out: it is invisible in any "how long did setup
+take" measurement, it was the single largest item once the setup loops were
+threaded, and it is pure overhead — the test is already over.
+
+The threaded calls themselves scale 6.1x (`tools/qpscale.c` measures
+create + INIT + RTR + RTS in isolation: 24.75 s serial, 4.08 s at 8 threads,
+kept as the regression check). The end-to-end gain is smaller because the
+rest of a run — TCP handshakes, `set_up_connection`, the traffic itself —
+is untouched.
+
+Thread count plateaus at ~6.4x past 8, which is why 8 is the default rather
+than the core count. QP counts below 8, XRC and DC keep the serial path;
+XRC/DC carry state across loop iterations.
 
 ## `--no-addr-info`
 
