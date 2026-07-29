@@ -94,7 +94,7 @@ tools/selfcheck.sh [ibdev] [local-ip]      # loopback, ~90 s, no root
 QPN join key, every trap below, the resolution warnings, and the two offline
 tools. Exits non-zero on any failure.
 
-## Three things that will silently give you a wrong curve
+## Four things that will silently give you a wrong curve
 
 **1. Not enough completions per bin.** A per-QP series is a curve only if
 each bin holds enough completions:
