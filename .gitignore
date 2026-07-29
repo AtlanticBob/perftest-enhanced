@@ -66,3 +66,4 @@ rdma-core-build/
 # experiment data: traces are tens of MB, summary.md carries the findings
 results/**/results/
 demo/results/
+__pycache__/
