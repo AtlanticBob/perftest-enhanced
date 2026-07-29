@@ -115,9 +115,17 @@ def main():
         bins = series_from_bins(rows, nqps, args.bin_us, size, rec_us)
 
     if args.sample_window:
-        margin = float(meta["margin_s"]) * 1e6
-        klo = int(margin // args.bin_us)
-        khi = int((float(meta["duration_s"]) * 1e6 - margin) // args.bin_us)
+        # Prefer the window catch_alarm() actually stamped over the nominal
+        # [margin, duration - margin]: the SIGALRM lands late by an unknown
+        # amount, and on a flow that steps rate near an edge that shifts the
+        # average by percent, not by rounding.
+        if "sample_start_us" in meta:
+            lo = float(meta["sample_start_us"])
+            hi = float(meta["sample_end_us"])
+        else:
+            lo = float(meta["margin_s"]) * 1e6
+            hi = float(meta["duration_s"]) * 1e6 - lo
+        klo, khi = int(lo // args.bin_us), int(hi // args.bin_us)
     else:
         klo, khi = min(bins), max(bins) + 1
 

@@ -43,6 +43,8 @@ int qptrace_init(struct pingpong_context *ctx,
 	q->margin = user_param->margin;
 	q->duration = user_param->duration;
 	q->csv_path = user_param->report_csv_file_name;
+	q->up = user_param;
+	q->test_type = user_param->test_type;
 	q->mhz = get_cpu_mhz(user_param->cpu_freq_f);
 	if (q->mhz <= 0) {
 		fprintf(stderr, "qptrace: could not acquire cpu frequency; "
@@ -112,9 +114,17 @@ static void qptrace_write_header(FILE *f)
 	fprintf(f, "# cpu_mhz=%.6f t0_tsc=%llu t0_realtime_ns=%llu\n",
 		q->mhz, (unsigned long long)q->t0_tsc,
 		(unsigned long long)q->t0_real_ns);
-	/* t0 is the duration alarm origin, so perftest's own reported number
-	 * covers [margin, duration - margin] microseconds from t=0 here. */
 	fprintf(f, "# margin_s=%d duration_s=%d\n", q->margin, q->duration);
+	/* The window perftest's own average actually covers. catch_alarm()
+	 * stamps these in the same clock as the trace, so this is exact;
+	 * [margin, duration - margin] is only a nominal fallback, and on a
+	 * flow whose rate steps near an edge the two disagree by percent. */
+	if (q->test_type == DURATION && q->up->tposted && q->up->tcompleted &&
+	    q->up->tposted[0] > q->t0_tsc &&
+	    q->up->tcompleted[0] > q->up->tposted[0])
+		fprintf(f, "# sample_start_us=%.3f sample_end_us=%.3f\n",
+			(q->up->tposted[0] - q->t0_tsc) / q->mhz,
+			(q->up->tcompleted[0] - q->t0_tsc) / q->mhz);
 	for (i = 0; i < q->nqps; i++)
 		fprintf(f, "# qpn %d %u\n", i, q->qpn[i]);
 	if (q->lost)

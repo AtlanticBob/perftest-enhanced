@@ -82,15 +82,27 @@ struct qptrace_state {
 	int			duration;
 	uint32_t		*qpn;		/* nqps entries: index -> QPN */
 	const char		*csv_path;
+	/* Kept so dump can read the sample window catch_alarm() stamped into
+	 * tposted[0]/tcompleted[0]. Those are in the same get_cycles() clock
+	 * as the trace, so the window can be reported exactly instead of
+	 * derived from margin/duration - which is off by however late the
+	 * SIGALRM landed, and that error is amplified whenever the rate
+	 * changes near a window edge. */
+	struct perftest_parameters *up;
+	int			test_type;
 };
 
 extern struct qptrace_state qptrace;
 
-/* Called once at the top of the bw loop, after the QPs exist and after the
- * duration alarm is armed (t0_tsc is therefore the alarm origin, which is
- * what lets the parser locate perftest's own [margin, duration - margin]
- * sample window). Returns 0 on success, and leaves mode == QPTRACE_OFF when
- * tracing was not requested. */
+/* Called once at the top of the bw loop, after the QPs exist. t0_tsc is
+ * stamped here and is NOT the duration alarm's origin - init runs a few
+ * hundred ms after the alarm is armed, mostly in get_cpu_mhz(). So the
+ * sample window is not derivable from margin/duration; dump reads the
+ * timestamps catch_alarm() left in tposted[0]/tcompleted[0] instead, which
+ * are in this same clock. Measured: the nominal window was off by 415 ms,
+ * worth 1.6% of the reported average on a flow that steps rate near an
+ * edge. Returns 0 on success, and leaves mode == QPTRACE_OFF when tracing
+ * was not requested. */
 struct pingpong_context;
 struct perftest_parameters;
 int qptrace_init(struct pingpong_context *ctx,
