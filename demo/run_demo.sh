@@ -6,14 +6,21 @@
 # average for each flow. The timings below are chosen so that A's reported
 # average is a rate A was never actually at:
 #
-#   t=0    A: sgpu01 vf0 -> sgpu02 vf0, 4 QPs      -D 40, window [10, 30]
-#   t=16   B: sgpu01 vf3 -> sgpu02 vf0, 4 QPs      -D 16
-#   t=32   B ends
-#   t=40   A ends
+#   t=0    A: sgpu01 vf0 -> sgpu02 vf0, 4 QPs      -D 60
+#   t=25   B: sgpu01 vf3 -> sgpu02 vf0, 4 QPs      -D 20
+#   t=45   B ends
+#   t=60   A ends
 #
-# A's sample window straddles the join, so its single number is a weighted
-# blend of the solo rate and the contended rate - a value the flow held for
-# essentially none of the run. That is the thing this fork exists to show.
+# The five phases the figure has to show: A alone, B enters, both, B leaves,
+# A alone again.
+#
+# Why B does not enter until t=25: the sender-side rate limiter takes a
+# one-off excursion somewhere in the first ~12 s of every run - it drops to
+# 10.3 Gb/s for about 4 s and then recovers for good. It is nothing to do
+# with contention; a control run of A completely alone reproduces it (see
+# README section 4). B enters well after it, so the figure shows contention
+# rather than that transient, and the plot starts at t=15 for the same
+# reason.
 #
 # vf0 and vf3 as the two sources deliberately: vf1 and vf2 hash to the same
 # PCC flowtag for every dst, so that pair would share one budget for a
@@ -30,7 +37,7 @@ TOOLS=$DIR/../tools
 DST=10.1.0.2; SRV_DEV=mlx5_6
 PA=18970; PB=18971
 QN=4; SZ=65536
-DUR_A=40; DUR_B=16; JOIN=16
+DUR_A=60; DUR_B=20; JOIN=25
 
 ssh -o BatchMode=yes sgpu02 "pkill -x ib_write_bw 2>/dev/null; true"
 pkill -x ib_write_bw 2>/dev/null; sleep 1
