@@ -12,6 +12,14 @@ partially initialised id would otherwise bind to the wrong device.
 Only affects -R / rdma_cm. Without -R, perftest exchanges addresses over
 TCP and never enters this code, so an unpatched rdma-core is fine.
 
+KNOWN REGRESSION - apply only if you have the symptom. On one test host,
+a v54.0 built with this patch made -R fail (RDMA_CM_EVENT_REJECTED) on VFs
+whose node_guid is NOT zero, while the same build without the patch, and
+the distribution's own v54.0, both worked. A second host with non-zero
+guids was unaffected, so the trigger is environment dependent and not yet
+understood. Treat this as a workaround for a specific failure, not as a
+general improvement.
+
 Apply with:
 
     cd rdma-core-src            # a v54.0 checkout

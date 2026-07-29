@@ -133,9 +133,11 @@ the same dual-license notice.
 
 8. `-R` (rdma_cm) cannot resolve the device on RoCE virtual functions that
    report a zero `node_guid`, because librdmacm matches on the guid. This is
-   an rdma-core issue, not a perftest one; `patches/` carries a fix against
-   rdma-core v54.0 for anyone who hits it. Runs without `-R` exchange
-   addresses over TCP and are unaffected.
+   an rdma-core issue, not a perftest one. `patches/` carries a change
+   against rdma-core v54.0 that addresses it, but **apply it only if you
+   have that symptom**: on one test host it made `-R` fail on VFs whose
+   `node_guid` is non-zero, where stock rdma-core works. Runs without `-R`
+   exchange addresses over TCP and are unaffected either way.
 
 ---
 ---
