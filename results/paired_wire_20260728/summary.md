@@ -18,15 +18,16 @@ the setup, not of the tools.
 
 | | sender | wire |
 |---|---|---|
-| where | sgpu01, `--report-per-qp` | hpft-dpu2, `QUERY_VPORT_COUNTER` |
+| where | sender host, `--report-per-qp` | receiver DPU, `QUERY_VPORT_COUNTER` |
 | counts | payload bytes on completion | frame octets on arrival |
 | clock | sgpu01 TSC, CLOCK_REALTIME at t0 | DPU CLOCK_MONOTONIC + REALTIME |
 | cadence | per CQE | 1 ms |
 
-The meter already publishes at 1 ms; only the lab's sampler reads it at
-1 Hz. `vpm_sample_fast.py` polls faster than the writer and dedupes on the
-published timestamp — 2977 samples in 3 s, i.e. the meter's native rate,
-with no change to the meter and no risk to it.
+The counter publisher already emits at 1 ms; the sampler that shipped with
+it read at 1 Hz. `vpm_sample_fast.py` polls faster than the writer and
+dedupes on the published timestamp — 2977 samples in 3 s, the native rate,
+with no change to the publisher and no risk to it. That publisher is
+site-specific scaffolding, not part of this tool.
 
 ## 1. Volume agreement: 0.07%
 
@@ -89,8 +90,8 @@ specific to this experiment.
 
 - Sub-10 ms lag between completion and wire (see 3).
 - Whether the wire excess is retransmission (see 4).
-- Anything about HPFT: its agents were off, though `doca_pcc` was live on
-  the sender DPU, as in the previous run.
+- Anything about the rate limiter that was live on the sender DPU during
+  this run, as in the previous one. It was present; that is all this says.
 
 ## Files
 

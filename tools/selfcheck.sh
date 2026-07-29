@@ -46,7 +46,7 @@ import sys
 a,b,tol=float(sys.argv[1] or 0),float(sys.argv[2] or 0),float(sys.argv[3])
 print(1 if a>0 and b>0 and abs(a-b)/a<tol else 0)" "$1" "$2" "$3"; }
 
-echo "perftest-hpft selfcheck: dev=$DEV ip=$IP"
+echo "perftest-enhanced selfcheck: dev=$DEV ip=$IP"
 echo
 
 echo "reconciliation - the trace must sum to what perftest reports"

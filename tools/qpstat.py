@@ -169,7 +169,7 @@ def main():
                              [c.get(f, 0) for f in fields]))
 
         with open(args.out, "w") as f:
-            f.write("# perftest-hpft qpstat v1\n")
+            f.write("# perftest-enhanced qpstat v1\n")
             f.write("# dev=%s interval_ms=%.0f\n" % (args.dev,
                                                      args.interval_ms))
             f.write("# t0_realtime_ns=%d\n" % int(t0 * 1e9))

@@ -13,18 +13,16 @@
 #   t=45   B leaves                                A alone again
 #   t=60   A ends
 #
-# vf0 and vf3 as the two sources deliberately: vf1 and vf2 hash to the same
-# PCC flowtag for every dst, so that pair would share one budget and muddy
-# the result for an unrelated reason.
+# The two source VFs are picked so they do not share a hardware
+# rate-limiter budget: on this fabric two of the four VFs hash together, and
+# such a pair would look throttled for a reason unrelated to contention.
 #
-# Reads nothing from and writes nothing to the hpft repos - no registry
-# edits, no agent restarts. HPFT's rx/tx agents are inactive during this
-# run, so what is being exercised is the native RoCE path.
+# Machine names and addresses below are the ones this was run on.
 set -u
 DIR=$(cd "$(dirname "$0")" && pwd)
 OUT="$DIR/results"; mkdir -p "$OUT"
 PT=$DIR/../../ib_write_bw                       # patched, client side
-PT_SRV=$HOME/hyperfront/perftest-26015/ib_write_bw   # stock, server side
+PT_SRV=${PT_SRV:-ib_write_bw}  # client-side patch; any build on the peer serves
 TOOLS=$DIR/../../tools
 
 DST=10.1.0.2; SRV_DEV=mlx5_6                    # sgpu02 vf0

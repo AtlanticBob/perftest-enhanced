@@ -1,4 +1,4 @@
-# perftest-hpft
+# perftest-enhanced
 
 A fork of **perftest 6.28** that records **per-QP bandwidth over time**.
 
@@ -93,7 +93,7 @@ exactly like a real one.
 ### The trace file
 
 ```
-# perftest-hpft qptrace v1
+# perftest-enhanced qptrace v1
 # mode=event
 # num_of_qps=4 msg_size=65536 cq_mod=1 duplex=0
 # cpu_mhz=2100.000000 t0_tsc=... t0_realtime_ns=...
@@ -218,7 +218,7 @@ not undo it:
 
 | messages | completions/s/QP | finest honest bin | total bandwidth |
 |---|---|---|---|
-| 65536 B | 10,666 | **938 µs** | 27.7 Gb/s |
+| 65536 B | 10,624 | **941 µs** | 27.7 Gb/s |
 | 2048 B + `-Q 1` | 401,997 | **25 µs** | 26.3 Gb/s |
 
 40× finer at essentially unchanged bandwidth. On the 2 KB trace the noise
@@ -277,7 +277,7 @@ a `summary.md` each.
 
 | check | result |
 |---|---|
-| per-QP series vs perftest's own average | 21.141 vs 21.14 Gb/s |
+| per-QP series vs perftest's own average | 23.138 vs 23.14 Gb/s |
 | binned mode vs perftest's own average | 27.576 vs 27.58 Gb/s |
 | binned totals vs event-mode totals | 240915 vs 240672 completions |
 | rate invariance across bin widths (0.5/1/2/10 ms) | identical to 3 decimals |

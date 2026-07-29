@@ -32,7 +32,11 @@ set -u
 DIR=$(cd "$(dirname "$0")" && pwd)
 OUT="$DIR/results"; mkdir -p "$OUT"
 PT=$DIR/../ib_write_bw                              # patched
-PT_SRV=$HOME/hyperfront/perftest-26015/ib_write_bw  # stock, server side
+# Server side: the patch is client-side only, so the server needs no patched
+# build - but perftest negotiates its parameters, so the two ends must be the
+# SAME VERSION. Resolved on the PEER; override if its default is not 6.28.
+#   PT_SRV=/path/to/matching/ib_write_bw ./run_demo.sh
+PT_SRV=${PT_SRV:-ib_write_bw}
 TOOLS=$DIR/../tools
 
 DST=10.1.0.2; SRV_DEV=mlx5_6
@@ -42,6 +46,13 @@ DUR_A=60; DUR_B=20; JOIN=25
 
 ssh -o BatchMode=yes sgpu02 "pkill -x ib_write_bw 2>/dev/null; true"
 pkill -x ib_write_bw 2>/dev/null; sleep 1
+
+# Version skew here shows up as an opaque crash on the peer during the
+# handshake, so check it before spending a minute finding out.
+lv=$("$PT" --version 2>&1 | head -1)
+rv=$(ssh -o BatchMode=yes sgpu02 "$PT_SRV --version 2>&1 | head -1")
+[ "$lv" = "$rv" ] || { echo "version skew: local '$lv' vs peer '$rv'"; \
+  echo "set PT_SRV to a matching build on the peer"; exit 1; }
 
 # -D is a NEGOTIATED parameter: each server's duration must equal its
 # client's exactly, or the handshake fails with "duration mismatch".

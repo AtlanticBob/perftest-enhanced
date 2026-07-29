@@ -107,7 +107,7 @@ static void qptrace_write_header(FILE *f)
 	struct qptrace_state *q = &qptrace;
 	int i;
 
-	fprintf(f, "# perftest-hpft qptrace v1\n");
+	fprintf(f, "# perftest-enhanced qptrace v1\n");
 	fprintf(f, "# mode=%s\n",
 		q->mode == QPTRACE_EVENT ? "event" : "bin");
 	fprintf(f, "# num_of_qps=%d msg_size=%lu cq_mod=%d duplex=%d\n",

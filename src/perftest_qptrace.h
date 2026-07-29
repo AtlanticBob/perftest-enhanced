@@ -134,8 +134,8 @@ static inline void qptrace_event(int qp_index, int msgs)
 /* Binned mode: called at the top of the outer posting loop. Snapshots the
  * whole per-QP counter array when the period has elapsed. The recorded
  * timestamp is the actual snapshot time, not the nominal deadline, because
- * the loop can be late; and an overrun does not try to catch up (same rule
- * as the rx-side vport meter). */
+ * the loop can be late; and an overrun does not try to catch up: a period
+ * that was missed is gone, not owed. */
 static inline void qptrace_tick(const uint64_t *ccnt)
 {
 	struct qptrace_state *q = &qptrace;

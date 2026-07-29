@@ -15,23 +15,24 @@ destination VF, then left alone again — the five phases the figure has to
 show.
 
 ```
-t=0     A: sgpu01 vf0 (mlx5_6) -> sgpu02 vf0 (10.1.0.2), 4 QPs, 65536 B, -D 60
-t=24.9  B: sgpu01 vf3 (mlx5_9) -> sgpu02 vf0,            4 QPs, 65536 B, -D 20
+t=0     A: host1 vf0 (mlx5_6) -> host2 vf0 (10.1.0.2), 4 QPs, 65536 B, -D 60
+t=25.0  B: host1 vf3 (mlx5_9) -> host2 vf0,            4 QPs, 65536 B, -D 20
 t=44.5  B leaves
 t=59.6  A ends
 ```
 
-B is held back until t=25 on purpose — see section 6.
-
 The two source VFs are picked so they do not land on the same hardware
 rate-limiter budget — on this fabric two of the four VFs hash together, and
 a pair that shares a budget would look throttled for a reason that has
-nothing to do with contention. Check your own fabric before assuming any
-two sources are independent.
+nothing to do with contention. Check your own fabric before assuming any two
+sources are independent.
 
 Machine names and addresses throughout are the ones this was run on; swap
-your own into `run_demo.sh`. The demo needs two hosts, one RDMA device each,
-and nothing else.
+your own into `run_demo.sh`. It needs two hosts with an RDMA device each and
+nothing else. The server end can be **any** perftest build of the same
+version — the patch is client-side — but perftest negotiates its parameters,
+so a version mismatch shows up as an opaque crash on the peer. `run_demo.sh`
+checks for that before starting and tells you to set `PT_SRV`.
 
 ## 2. How the tool is used — the entire difference
 
@@ -51,13 +52,13 @@ ib_write_bw -d mlx5_6 -p 18970 -s 65536 -q 4 --report_gbits -D 60 \
 
 **That is the whole difference.** Two flags. Everything else — the server
 side, the ports, `-q`, `-D`, the report perftest prints at the end — is
-unchanged, and the stock binary still works as the server.
+unchanged.
 
 Two more flags exist and are not used here:
 
 - `--report-interval-us=<us>` switches from one record per completion to
-  periodic snapshots. Only for message rates where per-CQE records will not
-  fit in memory; it costs you the ability to re-bin offline.
+  periodic snapshots. Only for message rates where per-completion records
+  will not fit in memory; it costs you the ability to re-bin offline.
 - `--report-trace-mb=<MB>` sizes the buffer (default 256).
 
 One gotcha the demo does not hit but you will: **`-D` is a negotiated
@@ -68,8 +69,8 @@ bites as soon as you script two flows with different durations.
 Optionally, alongside the run:
 
 ```sh
-sudo tools/qpstat.py --dev mlx5_6/1 --pid $APID --interval-ms 100 \
-                     --duration 57 --out results/A_qpstat.csv
+sudo ../tools/qpstat.py --dev mlx5_6/1 --pid $APID --interval-ms 100 \
+                        --duration 57 --out results/A_qpstat.csv
 ```
 
 Binds a dedicated hardware counter to each of that process's QPs, samples
@@ -79,8 +80,8 @@ the retransmit/error set, and unbinds on exit.
 
 ```
 results/
-  A_trace.csv      2.54M events, 41 MB   per-QP completion trace
-  B_trace.csv      0.68M events, 10 MB
+  A_trace.csv      2.53M events, 40 MB   per-QP completion trace
+  B_trace.csv      0.79M events, 12 MB
   A_qpstat.csv     per-QP retransmit counters at 100 ms
   B_qpstat.csv
   A_perftest.log   perftest's own report, unchanged
@@ -90,13 +91,13 @@ results/
 The trace header carries everything needed to interpret the body:
 
 ```
-# perftest-hpft qptrace v1
+# perftest-enhanced qptrace v1
 # mode=event
-# num_of_qps=4 msg_size=65536 cq_mod=1
+# num_of_qps=4 msg_size=65536 cq_mod=1 duplex=0
 # cpu_mhz=2100.000000 t0_tsc=... t0_realtime_ns=...
 # margin_s=15 duration_s=60
 # sample_start_us=... sample_end_us=...
-# qpn 0 1298
+# qpn 0 1386
 ...
 t_us,qp,msgs
 ```
@@ -108,21 +109,21 @@ Four of those lines matter more than they look:
   `plot_demo.py` gets B's offset from this, not from the `sleep` in the run
   script.
 - **`sample_start_us` / `sample_end_us`** are the window perftest's own
-  average actually covers, stamped by `catch_alarm` in the same clock as
-  the trace. Do not compute it from `margin`/`duration`: `t0` is stamped a
-  few hundred ms after the alarm is armed (mostly inside `get_cpu_mhz`),
-  and that nominal window measured 415 ms off — worth 1.6% of the reported
-  average on a flow that steps rate near an edge.
+  average actually covers, stamped by `catch_alarm` in the same clock as the
+  trace. Do not compute it from `margin`/`duration`: `t0` is stamped a few
+  hundred ms after the alarm is armed (mostly inside `get_cpu_mhz`), and that
+  nominal window measured 415 ms off — worth 1.6% of the reported average on
+  a flow that steps rate near an edge.
 - **`qpn <index> <lqpn>`** is the join key to `qpstat.csv`.
 - **`cq_mod`** is the quantum `msgs` advances in. It is 1 here because
-  perftest auto-disables cq_mod above 8192 bytes; at smaller message sizes
-  it silently reverts to 100 and you must pass `-Q 1`.
+  perftest auto-disables cq_mod above 8192 bytes; at smaller message sizes it
+  silently reverts to 100 and you must pass `-Q 1`.
 
 perftest also prints, at the end of the run:
 
 ```
-qptrace: 2541521 events written to results/A_trace.csv
-qptrace: 10666 completions/s/QP -> finest honest bin is ~938 us
+qptrace: 2532031 events written to results/A_trace.csv
+qptrace: 10624 completions/s/QP -> finest honest bin is ~941 us
 ```
 
 That second line is the tool reporting its own resolution **at the rate the
@@ -135,18 +136,18 @@ run actually achieved** — which nothing can know beforehand.
 ```sh
 $ python3 ../tools/qptrace_parse.py results/A_trace.csv --bin-us 5000 \
       --sample-window
-results/A_trace.csv: mode=event bins=6001 width=5000us span=30.005s qps=4
+results/A_trace.csv: mode=event bins=6000 width=5000us span=30.000s qps=4
   ...
-  all               21.141
+  all               23.138
 ```
 
-perftest's own report for this run says **21.14 Gb/s**. The per-QP series
-sums to **21.141**. Always do this before trusting a curve.
+perftest's own report for this run says **23.14 Gb/s**. The per-QP series
+sums to **23.138**. Always do this before trusting a curve.
 
 ### Re-bin freely — that is the point of event mode
 
 The trace holds one record per completion, not a pre-computed rate, so the
-bin width is chosen here rather than in the lab. The same run answers
+bin width is chosen here rather than on the wire. The same run answers
 questions at different scales without re-running anything:
 
 ```sh
@@ -169,26 +170,34 @@ python3 plot_demo.py            # writes demo.png
 
 ## 5. Reading the figure
 
-`t = 24.9 s` B enters; `t = 44.5 s` B leaves. Both come from the traces
+`t = 25.0 s` B enters; `t = 44.5 s` B leaves. Both come from the traces
 themselves, not from the script's intended schedule.
 
 | phase | what happens |
 |---|---|
 | A alone | flat 27.7 Gb/s |
-| B enters, t=24.9 | **nothing, for 6.5 s.** Both flows run at ~27.5 — the destination absorbs 55 Gb/s |
-| both, t=31.4 on | A and B step down together and settle at ~10.6 each, an even split |
-| B leaves, t=44.5 | A starts climbing back |
-| A alone, t=53.9 | back to 27.7 — **9.4 s to recover** |
+| B enters, t=25.0 | **nothing, for 11.3 s.** Both flows run at ~27.7 — the destination absorbs 55 Gb/s |
+| both, t=36.3 on | A and B step down together and settle at ~10.6 each, an even split |
+| B leaves, t=44.5 | A climbs back in stages: 10 → 14 → 15.5 → 24 |
+| A ends, t=59.6 | **still climbing** — 14.4 s after B left it had reached 26, not yet 27.7 |
 
-A 6.5 s reaction delay and a 9.4 s recovery are the kind of thing a single
-average per run cannot contain and a 1 s report can only hint at. Both are
-properties of whatever is shaping the traffic, not of this tool — see
-section 6.
+An 11.3 s reaction delay and a recovery that outlasts the run are exactly
+what a single average per run cannot contain and a 1 s report can only hint
+at.
 
-## 6. Why A dips at t≈8 s, with no B anywhere
+They also vary between runs. An earlier run of this same script reacted in
+6.5 s and recovered in 9.4 s. If you re-run the demo, expect the shape to
+hold and the timings to move — which is itself the argument for recording
+the curve rather than a number.
 
-Because it has nothing to do with B. A control run — flow A alone for 60 s,
-no second flow at any point — reproduces it:
+Both are properties of whatever is shaping the traffic, not of this tool.
+
+## 6. One thing to watch for that is not in this figure
+
+In some runs — not this one — the sender's rate limiter takes a **one-off
+excursion in the first ~12 s**: down to 10.3 Gb/s for about 4 s, then it
+recovers and stays up. A control run with flow A alone for 60 s and no
+second flow at any point reproduces it:
 
 ```
 A alone, no competitor, Gb/s per second:
@@ -196,24 +205,19 @@ A alone, no competitor, Gb/s per second:
                                         ^^^^^^^^^^^^^^^^ ~4 s at 10.3
 ```
 
-The sender-side rate limiter takes a **one-off excursion in the first ~12 s
-of every run**: down to 10.3 Gb/s for about 4 s, then it recovers and stays
-up. The timing moves between runs (7 s here, 12 s in an earlier one); the
-value does not — always the same 10.3, which is the signature of a fixed
-rate step rather than a feedback loop settling.
+The timing moves between runs and it does not always appear; the value does
+not move — always the same 10.3, the signature of a fixed rate step rather
+than a feedback loop settling.
 
-A programmable rate limiter was live in the sender's path with nothing
-feeding it targets, and is the obvious suspect. Not chased further here:
-this is a demo of the measurement tool, not of whatever is shaping the
-traffic. The general lesson transfers — **when a curve does something
-surprising, run the single-flow control before believing the explanation
-that fits the story you expected.**
+This is here because of how it was found. In an early version of this demo B
+entered at t=16, and the excursion happened to end exactly as B arrived —
+which read as *B's arrival restoring A's bandwidth*, a story that fits the
+picture and is physically nonsense. The control run is what settled it.
 
-It matters for the demo in one way. In an earlier run the excursion happened
-to end exactly when B entered, which made it look like B's arrival had
-*restored* A's bandwidth. It had not. **B is held back to t=25 so the figure
-shows contention rather than that transient** — and the plot still starts at
-t=0, so when the excursion does occur it is visible rather than cropped out.
+**When a curve does something surprising, run the single-flow control before
+believing the explanation that fits the story you expected.** B now enters at
+t=25 so the two cannot coincide, and the plot still starts at t=0 so the
+excursion is visible when it does occur.
 
 ## 7. Smoothness and resolution
 
@@ -227,12 +231,12 @@ With disjoint bins, a smoother line means a wider stretch means **fewer
 points**, and the curve degenerates into a staircase.
 
 A sliding window separates the two knobs: the **window** sets how much data
-each point averages (smoothness), the **step** sets how many points there
-are (density). This figure uses a 100 ms window advanced every 5 ms — 200
-points per second regardless of the window.
+each point averages (smoothness), the **step** sets how many points there are
+(density). This figure uses a 100 ms window advanced every 5 ms — 200 points
+per second regardless of the window.
 
-Measured on a genuinely flat stretch of this run, where the true rate is
-constant so all spread is measurement noise:
+Measured on a genuinely flat stretch, where the true rate is constant so all
+spread is measurement noise:
 
 | window | mean jump between adjacent points | worst |
 |---|---|---|
@@ -245,6 +249,8 @@ constant so all spread is measurement noise:
 100 ms is smooth to the eye and still resolves transitions to a tenth of a
 second, against events that take seconds. 500 ms would be smoother and would
 start rounding off the corners.
+
+`qptrace_parse.py --window-us` does the same thing for any trace.
 
 ### How fine the bins can go
 
@@ -276,7 +282,7 @@ undo it:
 
 | messages | completions/s/QP | finest honest bin | total bandwidth |
 |---|---|---|---|
-| 65536 B | 10,666 | **938 µs** | 27.7 Gb/s |
+| 65536 B | 10,624 | **941 µs** | 27.7 Gb/s |
 | 2048 B + `-Q 1` | 401,997 | **25 µs** | 26.3 Gb/s |
 
 **40x finer, at essentially unchanged bandwidth.** On the 2 KB trace the
@@ -284,35 +290,35 @@ noise stops falling below ~50 µs — it flattens at 8-10% from 50 µs out to
 1 ms — meaning that is no longer quantisation but the traffic's own
 burstiness. So ~25-50 µs is where measuring finer stops adding information.
 
-The cost is volume: 2 KB messages for 12 s produced 18M events and 276 MB;
-a 60 s run would be 1.4 GB.
+The cost is volume: 2 KB messages for 12 s produced 18M events and 276 MB; a
+60 s run would be 1.4 GB.
 
 | what you want to see | messages | window |
 |---|---|---|
 | convergence, steady-state fairness | 65536 B | 20-50 ms |
 | a flow entering or leaving | 65536 B | 2-5 ms |
-| response to a 1 ms control period | 8192 B + `-Q 1` | 200-500 µs |
-| packet-level CC behaviour | 2048 B + `-Q 1` | 25-50 µs |
+| response to a ~1 ms control loop | 8192 B + `-Q 1` | 200-500 µs |
+| packet-level congestion behaviour | 2048 B + `-Q 1` | 25-50 µs |
 
-Below 8192 B, **always pass `-Q 1`** — otherwise `cq_mod` silently reverts
-to 100 and resolution gets worse, not better.
+Below 8192 B, **always pass `-Q 1`** — otherwise `cq_mod` silently reverts to
+100 and resolution gets worse, not better.
 
 ## 8. What this demo does not show
 
 - **Per-QP detail.** The figure is per *flow*; the trace is per QP. In this
   run the 4 QPs of each flow coincide to Jain 1.0000 through both rate
   changes — the limiter acts on the flow, not the QP — so drawing them
-  separately would draw one line four times.
-- **Binned mode.** `--report-interval-us` is exercised in the fork's tests
+  separately would draw one line four times. Use
+  `qptrace_parse.py --fairness` to check that before believing it on your own
+  fabric.
+- **Binned mode.** `--report-interval-us` is covered by `tools/selfcheck.sh`
   but not here.
 - **Many QPs.** 4 per flow. At 32+ the per-QP rate drops and the honest bin
   coarsens proportionally.
-- **Multiple processes per host.** The lab's real experiments run one
-  perftest per VF; traces carry `t0_realtime_ns` so they *can* be merged
-  onto one axis — `plot_demo.py` does exactly that for two — but there is no
-  general N-way merge in `tools/` yet.
-- **Retransmits.** `packet_seq_err` is 0 for both flows here; nothing was
-  lost. The counters do work — in `../results/twohost_incast_20260728` all
-  four of a joining flow's errors landed in one 100 ms sample 0.42 s after
-  it joined, while the incumbent recorded none — but on a near-lossless
-  fabric they are an event marker, not a rate to plot.
+- **More than two processes.** `plot_demo.py` merges two traces by hand;
+  `../tools/qptrace_merge.py` does N.
+- **Retransmits.** `packet_seq_err` was 0 for A and 3 for B here — the
+  newcomer absorbed what little loss there was, the incumbent none. The
+  counters do work, and in `../results/twohost_incast_20260728` all four of a
+  joining flow's errors landed in one 100 ms sample 0.42 s after it joined,
+  but on a near-lossless fabric they are an event marker, not a rate to plot.
