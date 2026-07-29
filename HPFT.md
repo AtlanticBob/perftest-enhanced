@@ -81,8 +81,17 @@ with small messages.
 
 **3. This is the sender's completion curve, not the wire.** An RC WRITE
 completes when the ACK returns, and `tx_depth` (default 128) messages are in
-flight, so the curve lags and smooths relative to what is actually on the
-wire. For what arrived, use receiver-side hardware counters.
+flight, so the curve can lag and smooth relative to what is actually on the
+wire. Measured against receiver-side hardware counters
+(`results/paired_wire_20260728`): volume agrees to **0.07%** once MTU-derived
+header overhead is accounted for, shape correlates at **r = 0.97** at 5 ms
+bins, and per-bin variability is the same to three digits — so it is not
+smoothing away 5 ms structure. What that run could **not** settle is lag
+below ~10 ms, because cross-host NTP alignment is tens of ms against a
+`tx_depth` effect of ~2.4 ms; that needs a shared clock, not more runs. The
+wire also shows excursions above the sender's rate, most plausibly
+retransmitted arrivals that never complete — unproven. For what arrived, use
+receiver-side hardware counters.
 
 ## Validation (loopback, sgpu01 mlx5_6, 8 QPs)
 
