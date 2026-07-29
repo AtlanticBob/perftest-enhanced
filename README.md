@@ -131,6 +131,12 @@ the same dual-license notice.
    per direction whose size is `tx_depth × num_of_qps` and must fit the
    device's `max_cqe`. See item 10 of the upstream notes below.
 
+8. `-R` (rdma_cm) cannot resolve the device on RoCE virtual functions that
+   report a zero `node_guid`, because librdmacm matches on the guid. This is
+   an rdma-core issue, not a perftest one; `patches/` carries a fix against
+   rdma-core v54.0 for anyone who hits it. Runs without `-R` exchange
+   addresses over TCP and are unaffected.
+
 ---
 ---
 
