@@ -1,369 +1,123 @@
 # perftest-enhanced
 
-A fork of **perftest 6.28** that records **per-QP bandwidth over time**.
+An enhanced build of **perftest 6.28**, the RDMA micro-benchmark suite.
 
-Upstream perftest tells you one bandwidth number for a run. If you want to
-know what each queue pair was doing at each moment — the thing `iperf3 -P`
-gives you for TCP streams — it cannot tell you. This adds that, plus the
-offline tools to make the result usable, and changes nothing else.
+Everything upstream does is unchanged — same tests, same flags, same output,
+same numbers. This adds two things upstream does not have: a **per-QP
+bandwidth trace over time**, and **fast setup at large QP counts**.
 
-Baseline commit `5a928eb` is pristine upstream, so **`git diff 5a928eb` is
-the entire change**. Every stock test, flag and output is untouched, and an
-unpatched perftest works fine as the server for a patched client.
+The baseline commit `5a928eb` is pristine upstream, so `git diff 5a928eb`
+shows the entire change. The patch is client-side only, so an unpatched
+perftest of the same version works as the server.
 
----
+## What is added
 
-## The gap this fills
+**Per-QP bandwidth over time.** Upstream reports one bandwidth number per
+run, aggregated over all QPs; `--run_infinitely` can report every whole
+second, still aggregated. This records one entry per completion, attributed
+to the QP that produced it, so you can plot each QP's bandwidth against time
+and pick the resolution afterwards. Millisecond resolution is routine and
+tens of microseconds is reachable with small messages — for comparison,
+`iperf3 -i` stops at 0.1 s. Cost to the running test is under 0.1% of
+bandwidth.
 
-Stock perftest has two reporting modes, and neither answers "what was each
-flow doing, and when":
+**Fast setup at large QP counts.** Upstream creates, connects and destroys
+QPs one at a time, and prints two address lines per QP. At 16384 QPs that is
+roughly 50 seconds of overhead and 32768 lines of output around a test that
+may itself run for only a few seconds. This runs the per-QP loops across a
+thread pool and can suppress the address dump, taking the same run from
+52.4 s to 21.7 s and from 32790 lines to 22.
 
-- the default: **one average for the whole run**;
-- `--run_infinitely -D N`: one aggregate line every **N whole seconds**. The
-  one-second floor is not a design limit, it is literally `sleep(int)` in
-  `handle_signal_print_thread`.
+## Using the per-QP trace
 
-Both are aggregate over all QPs. For comparison, `iperf3 -i` bottoms out at
-0.1 s and is per-stream.
-
-The odd part is that perftest **already** attributes every completion to its
-QP and never says so: `wr_id` carries the QP index
-(`build_wr_id`/`get_wr_id_qp_index`) and `ctx->ccnt[]` is a per-QP array. The
-main polling loop does
-
-```c
-qp_index = get_wr_id_qp_index(wc[i].wr_id);
-ctx->ccnt[qp_index] += fill;
+```sh
+ib_write_bw -d mlx5_0 -s 65536 -q 8 -D 30 --report_gbits \
+            --report-per-qp --report-csv=run.csv <peer>
 ```
 
-and then reports only the sum. This fork records what is already there. It
-does not restructure anything.
+| flag | |
+|---|---|
+| `--report-per-qp` | enable the trace (bandwidth tests, client side) |
+| `--report-csv=<file>` | where it goes (default `perftest_qptrace.csv`) |
+| `--report-interval-us=<us>` | write periodic snapshots instead of one entry per completion; only needed when per-completion entries will not fit in memory |
+| `--report-trace-mb=<MB>` | trace buffer, preallocated (default 256) |
 
-## What is new
+The CSV body is `t_us,qp,msgs`, after a header carrying the message size, the
+QP number behind each index, the clock, and the window perftest's own average
+covers. Turn it into rates with `tools/qptrace_parse.py`:
+
+```sh
+tools/qptrace_parse.py run.csv --bin-us 5000 --sample-window --fairness
+tools/qptrace_parse.py run.csv --window-us 100000 --out rate.csv
+```
+
+## Using large QP counts
+
+```sh
+ib_write_bw -d mlx5_0 -s 1024 -q 16384 -D 3 -t 4 -r 4 --no-addr-info <peer>
+```
+
+| flag | |
+|---|---|
+| `--setup-threads=<n>` | threads for the per-QP create, connect and destroy loops (default 8; `1` restores upstream behaviour) |
+| `--no-addr-info` | do not print the per-QP local/remote address lines; the header and the final report are unaffected |
+
+At 16384 QPs on mlx5, `-D 3`:
+
+| | total run | output |
+|---|---|---|
+| upstream behaviour | 52.4 s | 32790 lines |
+| defaults here | **21.7 s** | **22 lines** |
+
+Threading helps because none of that work is hardware-serialised. The gain
+plateaus around 8 threads, which is why that is the default rather than the
+core count.
+
+## tools/
+
+Offline helpers for the trace, plus a self-check. None of them are needed to
+run a test.
 
 | | |
 |---|---|
-| `--report-per-qp` and three companions | per-QP bandwidth trace, in the bw tests |
-| `tools/qptrace_parse.py` | re-bin, smooth, reconcile, fairness |
-| `tools/qptrace_merge.py` | put N traces from N processes on one time axis |
-| `tools/qpstat.py` | per-QP retransmit / error counters alongside a run |
-| `tools/selfcheck.sh` | 16 assertions on a loopback pair, no root, no second host |
-| `demo/` | a complete worked example with a figure |
-
-## Quick start
-
-```sh
-# 1. run — the only difference from stock perftest is the two flags
-ib_write_bw -d <dev> -s 65536 -q 4 -D 30 --report_gbits \
-            --report-per-qp --report-csv=run.csv <peer>
-
-# 2. check the trace agrees with perftest's own number before trusting it
-tools/qptrace_parse.py run.csv --bin-us 5000 --sample-window --fairness
-
-# 3. produce a series to plot
-tools/qptrace_parse.py run.csv --window-us 100000 --step-us 5000 --out rate.csv
-```
-
-## `--setup-threads=<n>` — large QP counts
-
-perftest creates, connects and destroys its QPs one at a time. At 16384 QPs
-that is about **50 seconds** of a run in which only 3 seconds carry traffic.
-None of that work is hardware-serialised, so this fork runs all three
-per-QP loops across a thread pool. **Default 8; `--setup-threads=1` restores
-the old behaviour.**
-
-Measured on mlx5, 16384 QPs, `-D 3`, one process, wall clock:
-
-| | total run |
-|---|---|
-| `--setup-threads=1` | 52.4 s |
-| `--setup-threads=8` (default) | **21.7 s** |
-
-Where that time goes, at 16384 QPs:
-
-| phase | serial | threaded |
-|---|---|---|
-| create + INIT + connect | 32.3 s | 13.1 s |
-| traffic (`-D 3`) | 3.2 s | 3.2 s |
-| **destroy** | **17.4 s** | **5.6 s** |
-
-Destroy is worth calling out: it is invisible in any "how long did setup
-take" measurement, it was the single largest item once the setup loops were
-threaded, and it is pure overhead — the test is already over.
-
-The threaded calls themselves scale 6.1x (`tools/qpscale.c` measures
-create + INIT + RTR + RTS in isolation: 24.75 s serial, 4.08 s at 8 threads,
-kept as the regression check). The end-to-end gain is smaller because the
-rest of a run — TCP handshakes, `set_up_connection`, the traffic itself —
-is untouched.
-
-Thread count plateaus at ~6.4x past 8, which is why 8 is the default rather
-than the core count. QP counts below 8, XRC and DC keep the serial path;
-XRC/DC carry state across loop iterations.
-
-## `--no-addr-info`
-
-Suppresses the two `local address:` / `remote address:` lines perftest
-prints per QP. Everything else — the header, the parameters, the final
-report — is unchanged.
-
-```sh
-ib_write_bw -d <dev> -q 16384 -D 3 --no-addr-info <peer>
-```
-
-At 16384 QPs that is **32768 lines down to 0**; the run's whole output
-becomes 22 lines. Stock perftest can only get there with
-`--output=bandwidth`, which also throws away the header and the report and
-leaves you a bare number.
-
-Note this is a readability fix, not a speed one: with output redirected the
-printing costs nothing measurable (6.13 s vs 6.16 s for 1024 QPs). The cost
-is the terminal rendering tens of thousands of lines.
-
-## `--report-per-qp`
-
-```
---report-per-qp            enable (bw tests, client side)
---report-interval-us=<us>  bin width; 0 (default) = one record per completion
---report-csv=<file>        output (default perftest_qptrace.csv)
---report-trace-mb=<MB>     preallocated buffer (default 256)
-```
-
-**Event mode (the default) is the one you want.** It writes one record per
-completion, so the bin width is chosen *offline* — the same run can be
-replayed at 100 µs, 1 ms or 10 ms without going back to the wire. Binned mode
-(`--report-interval-us > 0`) snapshots the whole `ccnt[]` array on a period;
-it exists only for message rates where per-completion records will not fit in
-memory, and it costs you the ability to re-bin.
-
-Hot path is one predictable branch plus, when enabled, one rdtsc and one
-16-byte store. No signals — perftest's own `handle_signal_print_thread` fires
-a SIGALRM per report, which perturbs the polling loop once the period drops
-to milliseconds. Measured cost: **+0.009%** of bandwidth at 48K
-completions/s, **−0.07%** at 1.45M, both inside run-to-run spread.
-
-The buffer does not wrap. On overflow, recording stops and says so — on
-stderr *and* in the CSV header — because a silently truncated curve reads
-exactly like a real one.
-
-### The trace file
-
-```
-# perftest-enhanced qptrace v1
-# mode=event
-# num_of_qps=4 msg_size=65536 cq_mod=1 duplex=0
-# cpu_mhz=2100.000000 t0_tsc=... t0_realtime_ns=...
-# margin_s=15 duration_s=60
-# sample_start_us=... sample_end_us=...
-# qpn 0 1274
-...
-t_us,qp,msgs
-```
-
-Four header lines carry more than they look:
-
-- **`t0_realtime_ns`** places the trace on the wall clock, which is what lets
-  traces from separate processes be merged onto one axis.
-- **`sample_start_us` / `sample_end_us`** are the window perftest's own
-  average actually covers, stamped by `catch_alarm` in the same clock as the
-  trace. Do not derive it from `margin`/`duration`: `t0` is stamped a few
-  hundred ms after the alarm is armed (mostly inside `get_cpu_mhz`), measured
-  415 ms off — worth 1.6% of the reported average on a flow that changes rate
-  near a window edge.
-- **`qpn <index> <lqpn>`** is the join key to `qpstat.py` output.
-- **`cq_mod`** is the quantum `msgs` advances in. See trap 2.
-
-## Offline tools
-
-### `qptrace_parse.py` — one trace
-
-```sh
-tools/qptrace_parse.py run.csv --bin-us 5000 --sample-window --fairness
-tools/qptrace_parse.py run.csv --window-us 100000 --step-us 5000 --out r.csv
-```
-
-Prints per-QP and total Gb/s over the chosen window, optionally Jain
-fairness, and refuses to stay quiet when the requested bin is too fine to
-mean anything.
-
-**Prefer `--window-us` when you want a smooth curve.** A wider `--bin-us`
-buys smoothness by deleting points, and the line becomes a staircase. A
-sliding window keeps the two knobs independent: the *window* sets how much
-data each point averages, the *step* sets how many points there are.
-Measured on a flat stretch of a real run, adjacent points jump 2.73% at a
-10 ms window and 0.30% at 100 ms — at identical point density.
-
-### `qptrace_merge.py` — N traces
-
-```sh
-tools/qptrace_merge.py a_trace.csv b_trace.csv --window-us 100000 --out m.csv
-tools/qptrace_merge.py run*/trace.csv --bin-us 50000 --per-qp --out m.csv
-```
-
-One perftest process can only drive one device, so a many-flow experiment is
-usually N processes, each timestamped from its own `t0`. This aligns them via
-`t0_realtime_ns`. Exact within a host; across hosts only as good as the clock
-sync (NTP measured at tens of milliseconds here, fine for "who got what",
-useless for sub-10 ms timing). A flow's rows are absent outside its own
-lifetime rather than zero — that is absence, not a rate of zero.
-
-### `qpstat.py` — per-QP retransmits
-
-```sh
-sudo tools/qpstat.py --dev <dev>/1 --pid <perftest-pid> \
-                     --interval-ms 100 --duration 30 --out qpstat.csv
-```
-
-The column iperf3 has next to per-stream bandwidth and RDMA does not: which
-flow is retransmitting. Binds a dedicated hardware counter to each of that
-process's QPs, samples `packet_seq_err` / `out_of_sequence` /
-`local_ack_timeout_err` / …, and unbinds on exit. Joins to the bandwidth
-trace on LQPN.
-
-Two facts that force this shape, both verified on mlx5:
-
-- **q_counters carry no byte counts.** `rdma statistic show link <dev>/1`
-  yields request and error counters only. Bandwidth *has* to come from the
-  application; these counters are the complement, not a substitute.
-- **`rdma statistic qp set ... auto type on` does not give each QP its own
-  counter** — auto mode binds every QP of a type to one shared set. Per-QP
-  numbers need explicit `bind lqpn`, which needs root. Binding mid-run is
-  fine; these are cumulative counters, so a late start only costs a prefix.
-
-Sampling floor is ~50 ms (each sample shells out to `rdma`) — three orders
-coarser than the bandwidth trace, and the right trade: retransmits are
-counted events whose trajectory over seconds is the question.
-
-### `selfcheck.sh` — does it still work
-
-```sh
-tools/selfcheck.sh [ibdev] [local-ip]      # loopback, ~90 s, no root
-```
-
-16 assertions: reconciliation in both modes, per-QP attribution, the QPN join
-key, all four traps below, both resolution warnings, and the offline tools.
-Exits non-zero on any failure. Run this first if you have just picked the
-fork up.
-
-## Resolution: what you can actually get
-
-The recording has no floor — every completion carries its own timestamp. The
-**curve's** floor is set by how often completions happen:
-
-```
-finest honest bin ≈ 10 × message size / per-QP rate
-```
-
-Measured on one QP over 9 s of genuinely constant traffic, 65536 B messages,
-so all spread is measurement noise:
-
-| bin | completions/bin | measured rate | noise | empty bins |
-|---|---|---|---|---|
-| 50 µs | 0.7 | 6.93 | 77.6% | 35% |
-| 200 µs | 2.6 | 6.93 | 52.0% | 12% |
-| 1 ms | 13.2 | 6.93 | 14.8% | 0% |
-| 5 ms | 66 | 6.93 | 4.1% | 0% |
-| 50 ms | 661 | 6.93 | 0.4% | 0% |
-
-The rate is right at every width; only the noise grows. The built-in
-threshold of 10 completions per bin lands at about 15% noise — a "you can see
-the shape" line, not a "the number is precise" line.
-
-**Message size is the lever.** Same link, same QPs, `-Q 1` so `cq_mod` does
-not undo it:
-
-| messages | completions/s/QP | finest honest bin | total bandwidth |
-|---|---|---|---|
-| 65536 B | 10,624 | **941 µs** | 27.7 Gb/s |
-| 2048 B + `-Q 1` | 401,997 | **25 µs** | 26.3 Gb/s |
-
-40× finer at essentially unchanged bandwidth. On the 2 KB trace the noise
-stops falling below ~50 µs — flat at 8-10% from 50 µs out to 1 ms — meaning
-that is no longer quantisation but the traffic's own burstiness. So ~25-50 µs
-is where measuring finer stops adding information.
-
-The cost is volume: 2 KB messages for 12 s produced 18M events and 276 MB.
-
-| what you want to see | messages | window |
-|---|---|---|
-| convergence, steady-state fairness | 65536 B | 20-50 ms |
-| a flow entering or leaving | 65536 B | 2-5 ms |
-| response to a ~1 ms control loop | 8192 B + `-Q 1` | 200-500 µs |
-| packet-level congestion behaviour | 2048 B + `-Q 1` | 25-50 µs |
-
-## Four things that will silently give you a wrong curve
-
-**1. Not enough completions per bin.** See the table above. At 65536 B with
-128 QPs on a 25G link, a 1 ms bin holds 0.37 completions — a pulse train, not
-a curve, whatever the tool does. Both the tool (at dump time, against the
-rate the run actually achieved — which nothing can know beforehand) and the
-parser (at the bin you asked for) compute this and warn.
-
-**2. `cq_mod`.** `ccnt[]` advances in steps of `cq_mod` messages, so that is
-the finest resolution a trace can have. perftest auto-disables `cq_mod` only
-for `size > 8192`, so **shrinking the message to buy resolution silently
-re-enables the default of 100 and makes things worse**: measured, `-s 2048`
-gave 1811 completions/s/QP against 6577 at `-s 65536`. Pass `-Q 1` with small
-messages. Warned at parse time.
-
-**3. `-b` measures a different quantity than perftest reports.** In duplex
-mode perftest adds the remote endpoint's reported bandwidth to its own, while
-the trace holds only this endpoint's send completions — so the trace sums to
-roughly half the printed figure. Measured 27.60 reported against 14.01
-traced, with the trace's event count exactly equal to perftest's own
-`#iterations`; the accounting is right, the quantities differ. Warned at
-parse time, and `duplex=1` goes in the header so the parser warns too.
-
-**4. This is the sender's completion curve, not the wire.** An RC WRITE
-completes when its ACK returns, with `tx_depth` (default 128) messages in
-flight, so the curve can lag and smooth relative to what is on the wire.
-Checked against receiver-side NIC counters (`results/paired_wire_20260728`):
-volume agrees to **0.07%** once MTU-derived header overhead is accounted for,
-shape correlates at **r = 0.97** at 5 ms bins, and per-bin variability
-matches to three digits — so it is not smoothing away 5 ms structure. What
-that run could **not** settle is lag below ~10 ms: cross-host clock alignment
-was tens of ms against a `tx_depth` effect of ~2.4 ms. That needs a shared
-clock (PTP, or CQE hardware timestamps, which perftest does not use), not
-more runs.
-
-## Validation
-
-Measured on the machines this was developed on; `results/` holds the runs and
-a `summary.md` each.
-
-| check | result |
-|---|---|
-| per-QP series vs perftest's own average | 23.138 vs 23.14 Gb/s |
-| binned mode vs perftest's own average | 27.576 vs 27.58 Gb/s |
-| binned totals vs event-mode totals | 240915 vs 240672 completions |
-| rate invariance across bin widths (0.5/1/2/10 ms) | identical to 3 decimals |
-| sliding window vs disjoint bins | agree to 0.02% |
-| volume vs receiver-side NIC counters | 1.0562 vs 1.0569 predicted from MTU |
-| perturbation at 48K events/s | +0.009% |
-| perturbation at 1.45M events/s | −0.07% |
-
-## Scope
-
-Only `run_iter_bw` is hooked — for RDMA read/write the client is the only
-side that gets completions. `run_iter_bw_server` (send/recv) and the
-`run_infinitely` paths are untouched, and `--report-per-qp` is **rejected**
-with `-a` and `--run_infinitely` rather than silently producing one trace per
-size.
-
-Not implemented, deliberately:
-
-- **CQE hardware timestamps** (`IBV_WC_EX_WITH_COMPLETION_TIMESTAMP`). The
-  only way to settle sub-10 ms lag against a receiver, and unnecessary unless
-  you need that.
-- **send/recv server-side tracing.** Same hook, one function over; add it if
-  you need `ib_send_bw` server numbers.
-
-## Demo
-
-`demo/` runs a two-flow contention scenario end to end, traces it, and
-renders a figure. `demo/README.md` walks the whole path — the experiment, the
-exact command difference from stock perftest, what lands on disk, how to
-reconcile and re-bin it, and how to read the result.
+| `qptrace_parse.py` | one trace to per-QP rates, at any bin width or sliding window |
+| `qptrace_merge.py` | several traces from several processes onto one time axis |
+| `qpstat.py` | per-QP retransmit and error counters, sampled alongside a run |
+| `selfcheck.sh` | check this build still behaves, on a loopback pair |
+| `qpscale.c` | micro-benchmark for QP setup parallelism |
+
+## Known Issues
+
+1. A per-QP rate series is only meaningful if each bin holds enough
+   completions; roughly `10 × message_size / per-QP rate` sets the finest
+   useful bin. At 65536 B messages that is around 1 ms, and smaller messages
+   buy finer resolution. The achieved figure is printed at the end of a run,
+   and `qptrace_parse.py` warns when asked for something finer.
+
+2. perftest disables CQ moderation automatically only above 8192 bytes.
+   Below that, `cq_mod` stays at its default of 100 and the trace advances in
+   steps of 100 messages — so shrinking the message makes resolution worse,
+   not better. Pass `-Q 1` with small messages.
+
+3. With `-b`, perftest's reported bandwidth adds the remote endpoint's figure
+   to the local one, while the trace holds only this endpoint's send
+   completions. The two are not comparable. The trace header records
+   `duplex=1`.
+
+4. `--report-per-qp` is supported in the bandwidth tests, client side only,
+   and is rejected together with `-a` or `--run_infinitely`.
+
+5. `--setup-threads` is ignored for XRC and DC connections, and below 8 QPs;
+   the serial path is used instead.
+
+6. The trace is the sender's completion curve. An RDMA write completes when
+   its ACK returns, with `tx_depth` messages in flight, so it can lag the
+   wire during a transient. For what actually arrived, read receiver-side NIC
+   counters.
+
+7. Upstream's own limits still apply at scale, in particular the single CQ
+   per direction whose size is `tx_depth × num_of_qps` and must fit the
+   device's `max_cqe`. See item 10 of the upstream notes below.
 
 ---
 ---
