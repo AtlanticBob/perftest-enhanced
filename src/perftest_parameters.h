@@ -127,6 +127,10 @@
 #define DISABLED_CQ_MOD_VALUE    (1)
 #define MSG_SIZE_CQ_MOD_LIMIT (8192)
 /* per-QP tracing (perftest_qptrace.h) */
+#define DEF_SETUP_THREADS (8)
+#define MAX_SETUP_THREADS (64)
+/* below this many QPs the thread setup costs more than it saves */
+#define MIN_QPS_FOR_PARALLEL_SETUP (8)
 #define DEF_TRACE_MB (256)
 #define DEF_CSV_FILE_NAME "perftest_qptrace.csv"
 /* below this many completions per bin the per-QP series is quantisation
@@ -647,6 +651,10 @@ struct perftest_parameters {
 	int 				cpu_util;
 	int 				out_json;
 	char				*out_json_file_name;
+	/* threads used for the per-QP setup loops (create/INIT, and RTR/RTS).
+	 * Measured on mlx5 at 16384 QPs: 24.75 s serial, 4.08 s at 8 threads.
+	 * Scaling plateaus at ~6.4x past 8, so 8 is the default. */
+	int				setup_threads;
 	/* suppress the per-QP local/remote address dump: 2 lines per QP is
 	 * unreadable and slow to render past a few hundred QPs */
 	int				no_addr_info;

@@ -131,5 +131,14 @@ check "$(grep -qc '^t_s,source' "$TMP/merged.csv" >/dev/null && echo 1 || echo 0
       "merge puts two traces on one axis"
 
 echo
+echo "parallel QP setup"
+run "-s 65536 -q 16 -D 6 --report_gbits --setup-threads=1" ""
+ser=$(reported)
+run "-s 65536 -q 16 -D 6 --report_gbits --setup-threads=8" ""
+par=$(reported)
+check "$(close "$ser" "$par" 0.05)" \
+      "threaded setup matches serial (${ser:-?} vs ${par:-?} Gb/s)"
+
+echo
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" = 0 ] || exit 1

@@ -495,6 +495,9 @@ static void usage(const char *argv0, VerbType verb, TestType tst, int connection
 	printf("      --out_json_file=<file> ");
 	printf(" Name of the report json file. (Default: %s in the working directory) \n",DEFAULT_JSON_FILE_NAME);
 
+	printf("      --setup-threads=<n> ");
+	printf(" Threads used to create and connect the QPs. (Default: %d, 1 disables) \n",DEF_SETUP_THREADS);
+
 	printf("      --no-addr-info ");
 	printf(" Do not print the per-QP local/remote address lines. Everything else is unchanged; use this instead of --output when running many QPs \n");
 
@@ -994,6 +997,7 @@ static void init_perftest_params(struct perftest_parameters *user_param)
 	user_param->out_json			= 0;
 	user_param->out_json_file_name = strdup(DEFAULT_JSON_FILE_NAME);
 	user_param->no_addr_info		= 0;
+	user_param->setup_threads		= DEF_SETUP_THREADS;
 	user_param->report_per_qp		= 0;
 	user_param->report_interval_us		= 0;
 	user_param->report_trace_mb		= DEF_TRACE_MB;
@@ -2682,6 +2686,7 @@ int parser(struct perftest_parameters *user_param,char *argv[], int argc)
 	static int out_json_flag = 0;
 	static int out_json_file_flag = 0;
 	static int no_addr_info_flag = 0;
+	static int setup_threads_flag = 0;
 	static int report_per_qp_flag = 0;
 	static int report_interval_us_flag = 0;
 	static int report_trace_mb_flag = 0;
@@ -2907,6 +2912,7 @@ int parser(struct perftest_parameters *user_param,char *argv[], int argc)
 			#endif
 			{.name = "report-per-port", .has_arg = 0, .flag = &report_per_port_flag, .val = 1},
 			{.name = "no-addr-info", .has_arg = 0, .flag = &no_addr_info_flag, .val = 1},
+			{.name = "setup-threads", .has_arg = 1, .flag = &setup_threads_flag, .val = 1},
 			{.name = "report-per-qp", .has_arg = 0, .flag = &report_per_qp_flag, .val = 1},
 			{.name = "report-interval-us", .has_arg = 1, .flag = &report_interval_us_flag, .val = 1},
 			{.name = "report-trace-mb", .has_arg = 1, .flag = &report_trace_mb_flag, .val = 1},
@@ -3550,6 +3556,12 @@ int parser(struct perftest_parameters *user_param,char *argv[], int argc)
 				if (out_json_file_flag) {
 					user_param->out_json_file_name = strdup(optarg);
 					out_json_file_flag = 0;
+				}
+				if (setup_threads_flag) {
+					CHECK_VALUE_POSITIVE(user_param->setup_threads,int,"Setup threads",not_int_ptr);
+					if (user_param->setup_threads > MAX_SETUP_THREADS)
+						user_param->setup_threads = MAX_SETUP_THREADS;
+					setup_threads_flag = 0;
 				}
 				if (report_csv_file_flag) {
 					user_param->report_csv_file_name = strdup(optarg);

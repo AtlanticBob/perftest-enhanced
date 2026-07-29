@@ -1176,6 +1176,9 @@ int alloc_ctx(struct pingpong_context *ctx,struct perftest_parameters *user_para
 		ALLOC(user_param->tcompleted, cycles_t, 1);
 
 	ALLOC(ctx->qp, struct ibv_qp*, user_param->num_of_qps);
+	/* Zeroed so a partially-filled array can be cleaned up by skipping
+	 * NULLs; ALLOC is malloc, so without this the slots hold garbage. */
+	memset(ctx->qp, 0, sizeof(struct ibv_qp*) * user_param->num_of_qps);
 	#ifdef HAVE_IBV_WR_API
 	ALLOC(ctx->qpx, struct ibv_qp_ex*, user_param->num_of_qps);
 	#ifdef HAVE_MLX5DV
@@ -2379,6 +2382,112 @@ void check_bf_support(struct pingpong_context *ctx)
 	#endif
 }
 
+/******************************************************************************
+ * Parallel per-QP setup.
+ *
+ * At scale the setup loops dominate: measured on mlx5, one process creating
+ * and connecting 16384 QPs spends 24.75 s in ibv_create_qp plus the three
+ * ibv_modify_qp transitions. That work is not hardware-serialised - the same
+ * loops across 8 threads on ONE ibv context take 4.08 s, a 6.1x speedup that
+ * plateaus at ~6.4x past 8 threads, hence DEF_SETUP_THREADS.
+ *
+ * Safety, checked rather than assumed:
+ *  - each job writes only ctx->qp[i], ctx->qpx[i], ctx->dv_qp[i];
+ *    ctx_modify_qp_to_{init,rtr,rts} write no shared state at all.
+ *  - ctx_qp_create does write two user_param fields (inline_size and
+ *    use_enhanced_reorder), both "compute once, same answer every QP". QP 0
+ *    is therefore always done serially first, which settles them before any
+ *    thread runs and keeps the one-time message printing once.
+ *  - ctx_connect carries xrc_offset ACROSS iterations for XRC/DC, so those
+ *    connection types stay serial.
+ ******************************************************************************/
+struct setup_job {
+	struct pingpong_context		*ctx;
+	struct perftest_parameters	*user_param;
+	int (*fn)(struct setup_job *, int);
+	struct pingpong_dest		*dest;
+	struct pingpong_dest		*my_dest;
+	int				lo, hi;
+	int				rc;
+};
+
+static void *setup_worker(void *arg)
+{
+	struct setup_job *j = arg;
+	int i;
+
+	for (i = j->lo; i < j->hi; i++) {
+		if (j->fn(j, i)) {
+			j->rc = FAILURE;
+			return NULL;
+		}
+	}
+	return NULL;
+}
+
+/* Run job->fn over [lo, hi). Falls back to running inline when threading is
+ * disabled, would not pay, or the caller only has one item. */
+static int run_setup_range(struct setup_job *proto, int lo, int hi)
+{
+	pthread_t th[MAX_SETUP_THREADS];
+	struct setup_job job[MAX_SETUP_THREADS];
+	int n = proto->user_param->setup_threads;
+	int total = hi - lo, per, t, spawned = 0, rc = SUCCESS;
+
+	if (total <= 0)
+		return SUCCESS;
+	if (n > MAX_SETUP_THREADS)
+		n = MAX_SETUP_THREADS;
+	if (n < 1 || total < MIN_QPS_FOR_PARALLEL_SETUP)
+		n = 1;
+	if (n > total)
+		n = total;
+
+	if (n == 1) {
+		struct setup_job j = *proto;
+
+		j.lo = lo; j.hi = hi; j.rc = SUCCESS;
+		setup_worker(&j);
+		return j.rc;
+	}
+
+	per = (total + n - 1) / n;
+	for (t = 0; t < n; t++) {
+		job[t] = *proto;
+		job[t].lo = lo + t * per;
+		job[t].hi = job[t].lo + per > hi ? hi : job[t].lo + per;
+		job[t].rc = SUCCESS;
+		if (job[t].lo >= job[t].hi)
+			break;
+		if (pthread_create(&th[t], NULL, setup_worker, &job[t])) {
+			/* Out of threads: finish the rest on this one. */
+			job[t].hi = hi;
+			setup_worker(&job[t]);
+			if (job[t].rc)
+				rc = FAILURE;
+			break;
+		}
+		spawned++;
+	}
+	for (t = 0; t < spawned; t++) {
+		pthread_join(th[t], NULL);
+		if (job[t].rc)
+			rc = FAILURE;
+	}
+	return rc;
+}
+
+static int job_create_and_init(struct setup_job *j, int i)
+{
+	if (create_qp_main(j->ctx, j->user_param, i)) {
+		fprintf(stderr, "Failed to create QP.\n");
+		return FAILURE;
+	}
+	if (j->user_param->work_rdma_cm == OFF)
+		modify_qp_to_init(j->ctx, j->user_param, i);
+	return SUCCESS;
+}
+
 int ctx_init(struct pingpong_context *ctx, struct perftest_parameters *user_param)
 {
 	int i;
@@ -2608,25 +2717,38 @@ int ctx_init(struct pingpong_context *ctx, struct perftest_parameters *user_para
 	if (!(user_param->work_rdma_cm == OFF || ctx->cm_id))
 		return SUCCESS;
 
-	for (i=0; i < user_param->num_of_qps; i++) {
-		if (create_qp_main(ctx, user_param, i)) {
-			fprintf(stderr, "Failed to create QP.\n");
+	{
+		struct setup_job proto;
+
+		memset(&proto, 0, sizeof proto);
+		proto.ctx = ctx;
+		proto.user_param = user_param;
+		proto.fn = job_create_and_init;
+
+		/* QP 0 alone first: ctx_qp_create settles user_param->inline_size
+		 * and use_enhanced_reorder on its first call, and prints the
+		 * inline-size notice once. Doing it before any thread starts
+		 * keeps both facts true. */
+		if (run_setup_range(&proto, 0, 1))
+			goto qps;
+		qp_index = 1;
+
+		if (run_setup_range(&proto, 1, user_param->num_of_qps)) {
+			qp_index = user_param->num_of_qps;
 			goto qps;
 		}
-
-		if (user_param->work_rdma_cm == OFF) {
-			modify_qp_to_init(ctx, user_param, i);
-		}
-
-		qp_index++;
+		qp_index = user_param->num_of_qps;
 	}
 
 	return SUCCESS;
 
 
 qps:
+	/* A failed parallel range leaves holes, so skip slots that were never
+	 * filled. alloc_ctx zeroes ctx->qp for exactly this reason. */
 	for(i = 0; i < qp_index; i++){
-		ibv_destroy_qp(ctx->qp[i]);
+		if (ctx->qp[i])
+			ibv_destroy_qp(ctx->qp[i]);
 	}
 
 	if (user_param->use_srq && (user_param->tst == LAT ||
@@ -3266,6 +3388,42 @@ static int ctx_modify_qp_to_rts(struct ibv_qp *qp,
 /******************************************************************************
  *
  ******************************************************************************/
+static int job_connect_qp(struct setup_job *j, int i)
+{
+	struct perftest_parameters *user_param = j->user_param;
+	struct ibv_qp_attr attr;
+
+	memset(&attr, 0, sizeof attr);
+
+	if (user_param->rate_limit_type == HW_RATE_LIMIT)
+		attr.ah_attr.static_rate = user_param->valid_hw_rate_limit_index;
+
+	#if defined (HAVE_PACKET_PACING)
+	if (user_param->rate_limit_type == PP_RATE_LIMIT) {
+		if (check_packet_pacing_support(j->ctx) == FAILURE) {
+			fprintf(stderr, "Packet Pacing isn't supported.\n");
+			return FAILURE;
+		}
+	}
+	#endif
+
+	if (ctx_modify_qp_to_rtr(j->ctx->qp[i], &attr, user_param,
+				 &j->dest[i], &j->my_dest[i], i)) {
+		fprintf(stderr, "Failed to modify QP %d to RTR\n",
+			j->ctx->qp[i]->qp_num);
+		return FAILURE;
+	}
+	if (user_param->tst == LAT || user_param->machine == CLIENT ||
+	    user_param->duplex) {
+		if (ctx_modify_qp_to_rts(j->ctx->qp[i], &attr, user_param,
+					 &j->dest[i], &j->my_dest[i])) {
+			fprintf(stderr, "Failed to modify QP to RTS\n");
+			return FAILURE;
+		}
+	}
+	return SUCCESS;
+}
+
 int ctx_connect(struct pingpong_context *ctx,
 		struct pingpong_dest *dest,
 		struct perftest_parameters *user_param,
@@ -3278,6 +3436,21 @@ int ctx_connect(struct pingpong_context *ctx,
 	if((user_param->use_xrc || user_param->connection_type == DC) && (user_param->duplex || user_param->tst == LAT)) {
 		xrc_offset = user_param->num_of_qps / 2;
 	}
+	/* xrc_offset below is carried across iterations, so XRC and DC keep
+	 * the serial loop. Plain RC - which is what a large -q means - has no
+	 * cross-iteration state and is handed to the thread pool. */
+	if (!user_param->use_xrc && user_param->connection_type != DC) {
+		struct setup_job proto;
+
+		memset(&proto, 0, sizeof proto);
+		proto.ctx = ctx;
+		proto.user_param = user_param;
+		proto.fn = job_connect_qp;
+		proto.dest = dest;
+		proto.my_dest = my_dest;
+		return run_setup_range(&proto, 0, user_param->num_of_qps);
+	}
+
 	for (i=0; i < user_param->num_of_qps; i++) {
 
 

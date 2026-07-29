@@ -64,6 +64,29 @@ tools/qptrace_parse.py run.csv --bin-us 5000 --sample-window --fairness
 tools/qptrace_parse.py run.csv --window-us 100000 --step-us 5000 --out rate.csv
 ```
 
+## `--setup-threads=<n>` — large QP counts
+
+perftest creates and connects its QPs one at a time. At 16384 QPs that is
+about **50 seconds** before a single byte moves. The work is not
+hardware-serialised, so this fork runs both per-QP setup loops across a
+thread pool. **Default 8; `--setup-threads=1` restores the old behaviour.**
+
+Measured on mlx5, 16384 QPs, one process:
+
+| | setup |
+|---|---|
+| `--setup-threads=1` | 49.9 s |
+| `--setup-threads=8` (default) | **29.5 s** |
+
+The threaded part itself scales 6.1x (24.75 s to 4.08 s for
+create + INIT + RTR + RTS; `tools/qpscale.c` is that measurement, kept as
+the regression check). Overall it is 1.7x because the other half of
+perftest's setup is elsewhere and not yet attacked.
+
+Thread count plateaus at ~6.4x past 8 threads, which is why 8 is the
+default rather than the core count. QP counts below 8, XRC and DC keep the
+serial path — XRC/DC carry state across loop iterations.
+
 ## `--no-addr-info`
 
 Suppresses the two `local address:` / `remote address:` lines perftest
