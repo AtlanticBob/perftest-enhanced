@@ -22,11 +22,12 @@
 # rather than that transient, and the plot starts at t=15 for the same
 # reason.
 #
-# vf0 and vf3 as the two sources deliberately: vf1 and vf2 hash to the same
-# PCC flowtag for every dst, so that pair would share one budget for a
-# reason unrelated to the demo.
+# The two source VFs are picked so they do not share a hardware rate-limiter
+# budget - on this fabric two of the four VFs hash together, and such a pair
+# would look throttled for a reason unrelated to contention. Check your own
+# fabric before assuming two sources are independent.
 #
-# Nothing in the hpft repos is read or written. ~45 s.
+# Machine names and addresses below are the ones this was run on. ~65 s.
 set -u
 DIR=$(cd "$(dirname "$0")" && pwd)
 OUT="$DIR/results"; mkdir -p "$OUT"

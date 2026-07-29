@@ -23,15 +23,19 @@ t=59.6  A ends
 
 B is held back until t=25 on purpose — see section 6.
 
-`vf0` and `vf3` as the two sources deliberately: `vf1` and `vf2` hash to the
-same PCC flowtag for every destination, so that pair would share one budget
-for a reason unrelated to the demo.
+The two source VFs are picked so they do not land on the same hardware
+rate-limiter budget — on this fabric two of the four VFs hash together, and
+a pair that shares a budget would look throttled for a reason that has
+nothing to do with contention. Check your own fabric before assuming any
+two sources are independent.
 
-Nothing in the hpft repos is read or written.
+Machine names and addresses throughout are the ones this was run on; swap
+your own into `run_demo.sh`. The demo needs two hosts, one RDMA device each,
+and nothing else.
 
 ## 2. How the tool is used — the entire difference
 
-Stock invocation, as the lab scripts use it today:
+Stock invocation:
 
 ```sh
 ib_write_bw -d mlx5_6 -p 18970 -s 65536 -q 4 --report_gbits -D 60 10.1.0.2
@@ -177,8 +181,9 @@ themselves, not from the script's intended schedule.
 | A alone, t=53.9 | back to 27.7 — **9.4 s to recover** |
 
 A 6.5 s reaction delay and a 9.4 s recovery are the kind of thing a single
-average per run cannot contain and a 1 s report can only hint at. Both
-belong to the executor in the path, not to this tool — see section 6.
+average per run cannot contain and a 1 s report can only hint at. Both are
+properties of whatever is shaping the traffic, not of this tool — see
+section 6.
 
 ## 6. Why A dips at t≈8 s, with no B anywhere
 
@@ -197,9 +202,12 @@ up. The timing moves between runs (7 s here, 12 s in an earlier one); the
 value does not — always the same 10.3, which is the signature of a fixed
 rate step rather than a feedback loop settling.
 
-`doca_pcc` is live on the sender DPU with nothing feeding it targets, and is
-the obvious suspect. Not chased further here: this is a demo of the
-measurement tool, not of the executor.
+A programmable rate limiter was live in the sender's path with nothing
+feeding it targets, and is the obvious suspect. Not chased further here:
+this is a demo of the measurement tool, not of whatever is shaping the
+traffic. The general lesson transfers — **when a curve does something
+surprising, run the single-flow control before believing the explanation
+that fits the story you expected.**
 
 It matters for the demo in one way. In an earlier run the excursion happened
 to end exactly when B entered, which made it look like B's arrival had
@@ -304,8 +312,7 @@ to 100 and resolution gets worse, not better.
   onto one axis — `plot_demo.py` does exactly that for two — but there is no
   general N-way merge in `tools/` yet.
 - **Retransmits.** `packet_seq_err` is 0 for both flows here; nothing was
-  lost. The counters work — in `../results/twohost_incast_20260728` all four
-  of a joining flow's errors landed in one 100 ms sample 0.42 s after it
-  joined, while the incumbent recorded none — but on this near-lossless
+  lost. The counters do work — in `../results/twohost_incast_20260728` all
+  four of a joining flow's errors landed in one 100 ms sample 0.42 s after
+  it joined, while the incumbent recorded none — but on a near-lossless
   fabric they are an event marker, not a rate to plot.
-- **Anything about HPFT.** Its agents were off for this run.

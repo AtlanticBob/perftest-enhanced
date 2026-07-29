@@ -1,4 +1,4 @@
-/* perftest_qptrace: per-QP bandwidth-over-time tracing (HyperFront fork).
+/* perftest_qptrace: per-QP bandwidth-over-time tracing.
  *
  * Why this exists: upstream perftest already attributes every completion to
  * its QP - the wr_id carries the qp index (build_wr_id/get_wr_id_qp_index)
