@@ -26,7 +26,10 @@ config.h
 config.h.in*
 config.log
 config.status
-configure*
+# NOT "configure*": that also matches configure.ac, which is source. The
+# generated script and its backup only.
+/configure
+/configure~
 libtool
 m4/
 stamp-h1
@@ -53,7 +56,6 @@ raw_ethernet_burst_lat
 raw_ethernet_fs_rate
 
 #Debian Stuff
-debian/compat
 debian/*.log
 debian/files
 debian/perftest
