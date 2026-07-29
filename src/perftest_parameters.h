@@ -647,6 +647,9 @@ struct perftest_parameters {
 	int 				cpu_util;
 	int 				out_json;
 	char				*out_json_file_name;
+	/* suppress the per-QP local/remote address dump: 2 lines per QP is
+	 * unreadable and slow to render past a few hundred QPs */
+	int				no_addr_info;
 	/* per-QP bandwidth tracing, see perftest_qptrace.h */
 	int				report_per_qp;
 	int				report_interval_us;

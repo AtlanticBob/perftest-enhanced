@@ -64,6 +64,25 @@ tools/qptrace_parse.py run.csv --bin-us 5000 --sample-window --fairness
 tools/qptrace_parse.py run.csv --window-us 100000 --step-us 5000 --out rate.csv
 ```
 
+## `--no-addr-info`
+
+Suppresses the two `local address:` / `remote address:` lines perftest
+prints per QP. Everything else — the header, the parameters, the final
+report — is unchanged.
+
+```sh
+ib_write_bw -d <dev> -q 16384 -D 3 --no-addr-info <peer>
+```
+
+At 16384 QPs that is **32768 lines down to 0**; the run's whole output
+becomes 22 lines. Stock perftest can only get there with
+`--output=bandwidth`, which also throws away the header and the report and
+leaves you a bare number.
+
+Note this is a readability fix, not a speed one: with output redirected the
+printing costs nothing measurable (6.13 s vs 6.16 s for 1024 QPs). The cost
+is the terminal rendering tens of thousands of lines.
+
 ## `--report-per-qp`
 
 ```

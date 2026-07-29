@@ -495,6 +495,9 @@ static void usage(const char *argv0, VerbType verb, TestType tst, int connection
 	printf("      --out_json_file=<file> ");
 	printf(" Name of the report json file. (Default: %s in the working directory) \n",DEFAULT_JSON_FILE_NAME);
 
+	printf("      --no-addr-info ");
+	printf(" Do not print the per-QP local/remote address lines. Everything else is unchanged; use this instead of --output when running many QPs \n");
+
 	printf("      --report-per-qp ");
 	printf(" Record a per-QP bandwidth time series (bw tests, client side) \n");
 
@@ -990,6 +993,7 @@ static void init_perftest_params(struct perftest_parameters *user_param)
 	user_param->cpu_util			= 0;
 	user_param->out_json			= 0;
 	user_param->out_json_file_name = strdup(DEFAULT_JSON_FILE_NAME);
+	user_param->no_addr_info		= 0;
 	user_param->report_per_qp		= 0;
 	user_param->report_interval_us		= 0;
 	user_param->report_trace_mb		= DEF_TRACE_MB;
@@ -2677,6 +2681,7 @@ int parser(struct perftest_parameters *user_param,char *argv[], int argc)
 	static int cpu_util_flag = 0;
 	static int out_json_flag = 0;
 	static int out_json_file_flag = 0;
+	static int no_addr_info_flag = 0;
 	static int report_per_qp_flag = 0;
 	static int report_interval_us_flag = 0;
 	static int report_trace_mb_flag = 0;
@@ -2901,6 +2906,7 @@ int parser(struct perftest_parameters *user_param,char *argv[], int argc)
 			{ .name = "raw_ipv6",		.has_arg = 0, .flag = &raw_ipv6_flag, .val = 1},
 			#endif
 			{.name = "report-per-port", .has_arg = 0, .flag = &report_per_port_flag, .val = 1},
+			{.name = "no-addr-info", .has_arg = 0, .flag = &no_addr_info_flag, .val = 1},
 			{.name = "report-per-qp", .has_arg = 0, .flag = &report_per_qp_flag, .val = 1},
 			{.name = "report-interval-us", .has_arg = 1, .flag = &report_interval_us_flag, .val = 1},
 			{.name = "report-trace-mb", .has_arg = 1, .flag = &report_trace_mb_flag, .val = 1},
@@ -3862,6 +3868,10 @@ int parser(struct perftest_parameters *user_param,char *argv[], int argc)
 
 	if (report_per_port_flag) {
 		user_param->report_per_port = 1;
+	}
+
+	if (no_addr_info_flag) {
+		user_param->no_addr_info = 1;
 	}
 
 	if (report_per_qp_flag) {

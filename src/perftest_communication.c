@@ -1439,6 +1439,9 @@ int create_comm_struct(struct perftest_comm *comm,
 	comm->rdma_params->use_xrc	   	= user_param->use_xrc;
 	comm->rdma_params->connection_type	= user_param->connection_type;
 	comm->rdma_params->output      		= user_param->output;
+	/* create_comm_struct copies a whitelist into a fresh zeroed struct, so
+	 * anything ctx_print_pingpong_data reads has to be listed here. */
+	comm->rdma_params->no_addr_info		= user_param->no_addr_info;
 	comm->rdma_params->report_per_port 	= user_param->report_per_port;
 	comm->rdma_params->retry_count		= user_param->retry_count;
 	comm->rdma_params->qp_timeout		= user_param->qp_timeout;
@@ -1926,7 +1929,11 @@ void ctx_print_pingpong_data(struct pingpong_dest *element,
 	uint16_t dlid = (comm->rdma_params->dlid && comm->rdma_params->side == REMOTE) ?
 				comm->rdma_params->dlid : element->lid;
 
-	if (comm->rdma_params->output != FULL_VERBOSITY)
+	/* Two lines per QP: unreadable past a few hundred, and at 16K it is
+	 * tens of thousands of writes to a terminal. Redirected it costs
+	 * nothing measurable, so this is about the terminal, not the clock. */
+	if (comm->rdma_params->output != FULL_VERBOSITY ||
+	    comm->rdma_params->no_addr_info)
 		return;
 	/*First of all we print the basic format.*/
 	printf(BASIC_ADDR_FMT, sideArray[comm->rdma_params->side], dlid, element->qpn, element->psn);
