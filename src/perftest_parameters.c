@@ -1682,6 +1682,16 @@ static void force_dependecies(struct perftest_parameters *user_param)
 					" (the trace is written when the run ends).\n");
 			exit(1);
 		}
+		if (user_param->duplex) {
+			printf(RESULT_LINE);
+			printf(" WARNING: --report-per-qp with -b measures a DIFFERENT"
+					" quantity than the number perftest prints.\n");
+			printf(" WARNING: the trace holds this endpoint's send"
+					" completions; perftest's duplex figure adds the remote"
+					" endpoint's report to the local one. Expect the trace"
+					" to sum to roughly half of it, and do not reconcile the"
+					" two. (duplex=1 is recorded in the trace header.)\n");
+		}
 		if (user_param->cq_mod > 1) {
 			printf(RESULT_LINE);
 			printf(" WARNING: --report-per-qp with cq_mod=%d: the per-QP"

@@ -90,6 +90,7 @@ struct qptrace_state {
 	 * changes near a window edge. */
 	struct perftest_parameters *up;
 	int			test_type;
+	int			duplex;
 };
 
 extern struct qptrace_state qptrace;

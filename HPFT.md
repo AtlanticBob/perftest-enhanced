@@ -43,6 +43,32 @@ curve reads exactly like a real one.
 `# qpn <index> <lqpn>` lines in the CSV header are the join key to the
 retransmit counters below.
 
+## Offline: `tools/qptrace_parse.py`, `tools/qptrace_merge.py`
+
+`qptrace_parse.py` re-bins one trace and reconciles it against perftest's
+own average. Two ways to shape the series:
+
+```sh
+tools/qptrace_parse.py run.csv --bin-us 5000 --sample-window --fairness
+tools/qptrace_parse.py run.csv --window-us 100000 --step-us 5000 --out r.csv
+```
+
+Prefer `--window-us` when you want a smooth curve. A wider `--bin-us` buys
+smoothness by deleting points and the line becomes a staircase; a sliding
+window keeps the two independent - the window sets how much data each point
+averages, the step sets how many points there are. Measured on a flat
+stretch of a real run, adjacent points jump 2.73% at a 10 ms window and
+0.30% at 100 ms, at identical point density.
+
+`qptrace_merge.py` puts several traces on one axis, which is what a run of
+"128 flows" actually is - one perftest process per VF, each timestamped from
+its own t0. Alignment uses `t0_realtime_ns`, so it is exact within a host
+and only as good as NTP across hosts (tens of ms, measured).
+
+```sh
+tools/qptrace_merge.py vf*/A_trace.csv --window-us 100000 --out merged.csv
+```
+
 ## Retransmits: `tools/qpstat.py`
 
 ```sh
@@ -57,6 +83,16 @@ unbinds on exit. Needs root. Joins to the bandwidth trace on LQPN.
 Sampling floor is ~50 ms (each sample shells out to `rdma`), which is three
 orders coarser than the bandwidth trace and is the right trade: retransmits
 are counted events whose trajectory over seconds is the question.
+
+## Checking it still works
+
+```sh
+tools/selfcheck.sh [ibdev] [local-ip]      # loopback, ~90 s, no root
+```
+
+16 assertions covering reconciliation in both modes, per-QP attribution, the
+QPN join key, every trap below, the resolution warnings, and the two offline
+tools. Exits non-zero on any failure.
 
 ## Three things that will silently give you a wrong curve
 
@@ -79,7 +115,15 @@ re-enables the default of 100 and makes things worse**: measured on loopback,
 `-s 2048` gave 1811 completions/s/QP against 6577 at `-s 65536`. Pass `-Q 1`
 with small messages.
 
-**3. This is the sender's completion curve, not the wire.** An RC WRITE
+**3. `-b` measures a different quantity than perftest reports.** In duplex
+mode perftest adds the remote endpoint's reported bandwidth to its own
+([`perftest_parameters.c`](src/perftest_parameters.c) `print_full_bw_report`),
+while the trace holds only this endpoint's send completions - so the trace
+sums to roughly half the printed figure, and the two must not be reconciled.
+Warned at parse time, and `duplex=1` goes in the trace header so the parser
+warns too.
+
+**4. This is the sender's completion curve, not the wire.** An RC WRITE
 completes when the ACK returns, and `tx_depth` (default 128) messages are in
 flight, so the curve can lag and smooth relative to what is actually on the
 wire. Measured against receiver-side hardware counters

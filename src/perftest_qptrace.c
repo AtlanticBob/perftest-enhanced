@@ -45,6 +45,7 @@ int qptrace_init(struct pingpong_context *ctx,
 	q->csv_path = user_param->report_csv_file_name;
 	q->up = user_param;
 	q->test_type = user_param->test_type;
+	q->duplex = user_param->duplex;
 	q->mhz = get_cpu_mhz(user_param->cpu_freq_f);
 	if (q->mhz <= 0) {
 		fprintf(stderr, "qptrace: could not acquire cpu frequency; "
@@ -109,8 +110,12 @@ static void qptrace_write_header(FILE *f)
 	fprintf(f, "# perftest-hpft qptrace v1\n");
 	fprintf(f, "# mode=%s\n",
 		q->mode == QPTRACE_EVENT ? "event" : "bin");
-	fprintf(f, "# num_of_qps=%d msg_size=%lu cq_mod=%d\n",
-		q->nqps, (unsigned long)q->msg_size, q->cq_mod);
+	fprintf(f, "# num_of_qps=%d msg_size=%lu cq_mod=%d duplex=%d\n",
+		q->nqps, (unsigned long)q->msg_size, q->cq_mod, q->duplex);
+	if (q->duplex)
+		fprintf(f, "# NOTE duplex: this trace is THIS endpoint's send"
+			" completions only; perftest's reported figure adds the"
+			" remote endpoint's. The two are not comparable.\n");
 	fprintf(f, "# cpu_mhz=%.6f t0_tsc=%llu t0_realtime_ns=%llu\n",
 		q->mhz, (unsigned long long)q->t0_tsc,
 		(unsigned long long)q->t0_real_ns);
