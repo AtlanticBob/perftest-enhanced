@@ -3,12 +3,15 @@
 An enhanced build of **perftest 6.28**, the RDMA micro-benchmark suite.
 
 Everything upstream does is unchanged — same tests, same flags, same output,
-same numbers. This adds two things upstream does not have: a **per-QP
-bandwidth trace over time**, and **fast setup at large QP counts**.
+same numbers. This adds three things upstream does not have: a **per-QP
+bandwidth trace over time**, **fast setup at large QP counts**, and a
+**punctual start**, so that several processes on several machines can begin
+sending at the same instant.
 
 The baseline commit `5a928eb` is pristine upstream, so `git diff 5a928eb`
-shows the entire change. The patch is client-side only, so an unpatched
-perftest of the same version works as the server.
+shows the entire change. Everything added acts on the client, so an unpatched
+perftest of the same version still works as the server — as long as the extra
+flags are given only to the client.
 
 Upstream: <https://github.com/linux-rdma/perftest>, tag v6.28.
 
@@ -29,6 +32,13 @@ roughly 50 seconds of overhead and 32768 lines of output around a test that
 may itself run for only a few seconds. This runs the per-QP loops across a
 thread pool and can suppress the address dump, taking the same run from
 52.4 s to 21.7 s and from 32790 lines to 22.
+
+**A punctual start.** `--start_at` connects as usual and then holds the first
+packet until an absolute wall-clock time you choose. Several processes, on
+several machines, given the same instant, begin within a tenth of a
+millisecond of each other. That is what makes a step experiment readable: a
+flow that joins or leaves at a known moment, rather than whenever its process
+happened to finish connecting.
 
 ## Using the per-QP trace
 
@@ -74,6 +84,34 @@ At 16384 QPs on mlx5, `-D 3`:
 Threading helps because none of that work is hardware-serialised. The gain
 plateaus around 8 threads, which is why that is the default rather than the
 core count.
+
+## Starting on time
+
+```sh
+# on every machine, with the same T (date +%s, plus enough to connect)
+ib_write_bw -d mlx5_0 -q 4 -D 30 --report_gbits --start_at=$T <peer>
+```
+
+| flag | |
+|---|---|
+| `--start_at=<unix time>` | connect, then wait until this absolute time (float seconds) before the first packet |
+
+The wait happens after the QPs are connected and after every other slow step,
+so nothing stands between the deadline and the first packet. This matters
+more than it sounds: measuring the CPU clock, which perftest needs for the
+software rate limiter and this build needs for the trace, busy-waits 219 ms,
+and upstream does it *after* arming the duration alarm. A run that asked for
+30 seconds therefore spent its first fifth of a second connected, timed, and
+silent. Here every such step is finished before the deadline; the alarm, the
+trace's origin and the first packet all start together, measured at 0.1 ms.
+
+The clock is `CLOCK_REALTIME`, so the machines have to agree on the time —
+NTP or PTP, checked, not assumed. A deadline already in the past is not an
+error: the run simply starts immediately.
+
+The trace header records `t0_realtime_ns`, so traces captured on different
+machines land on one absolute axis without any further alignment; that is
+what `tools/qptrace_merge.py` uses.
 
 ## tools/
 

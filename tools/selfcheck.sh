@@ -145,5 +145,21 @@ check "$(close "$ser" "$par" 0.05)" \
       "threaded setup matches serial (${ser:-?} vs ${par:-?} Gb/s)"
 
 echo
+echo "punctual start"
+T=$(python3 -c "import time;print(int(time.time())+8)")
+run "-s 65536 -q 4 -D 6 --report_gbits --start_at=$T" \
+    "--report-per-qp --report-csv=$TMP/start.csv"
+off=$(python3 -c "
+import re
+t0=[int(re.search(r't0_realtime_ns=(\d+)',l).group(1))
+    for l in open('$TMP/start.csv') if 't0_realtime_ns' in l]
+print('%.1f' % ((t0[0]/1e9-$T)*1e3) if t0 else 'nan')")
+check "$(python3 -c "
+try: print(1 if abs(float('$off')) < 20 else 0)
+except ValueError: print(0)")" \
+      "--start_at releases the first packet on time ($off ms late)" \
+      "every slow step must run before the deadline, not after it"
+
+echo
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" = 0 ] || exit 1

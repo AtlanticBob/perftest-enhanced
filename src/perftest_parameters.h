@@ -491,6 +491,9 @@ enum gpu_touch_type {
 };
 
 struct perftest_parameters {
+	/* --start_at=<unix time, float>: after all connections are up, sleep until
+	 * this absolute wall-clock time before the first data packet (0 = off) */
+	double				start_at;
 
 	int				port;
 	char				*ib_devname;

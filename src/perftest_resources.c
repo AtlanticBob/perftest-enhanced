@@ -14,6 +14,7 @@
 #include <limits.h>
 #include <errno.h>
 #include <signal.h>
+#include <time.h>
 #include <string.h>
 #include <ctype.h>
 #include <sys/mman.h>
@@ -4251,33 +4252,9 @@ int run_iter_bw(struct pingpong_context *ctx,struct perftest_parameters *user_pa
 	#endif
 
 	ALLOCATE(wc ,struct ibv_wc ,dyn_ctx->config.max);
-	if (user_param->test_type == DURATION) {
-		duration_param=user_param;
-		duration_param->state = START_STATE;
-		signal(SIGALRM, catch_alarm);
-		if (user_param->margin > 0 )
-			alarm(user_param->margin);
-		else
-			catch_alarm(0); /* move to next state */
-
-		user_param->iters = 0;
-	}
 
 	if (user_param->duplex && (user_param->use_xrc || user_param->connection_type == DC))
 		num_of_qps /= 2;
-
-	/* Will be 0, in case of Duration (look at force_dependencies or in the exp above). */
-	tot_iters = (uint64_t)user_param->iters*num_of_qps;
-
-	if (user_param->test_type == DURATION && user_param->state != START_STATE && user_param->margin > 0) {
-		fprintf(stderr, "Failed: margin is not long enough (taking samples before warmup ends)\n");
-		fprintf(stderr, "Please increase margin or decrease tx_depth\n");
-		return_value = FAILURE;
-		goto cleaning;
-	}
-
-	if (user_param->test_type == ITERATIONS && user_param->noPeak == ON)
-		user_param->tposted[0] = get_cycles();
 
 	/* If using rate limiter, calculate gap time between bursts */
 	if (user_param->rate_limit_type == SW_RATE_LIMIT ) {
@@ -4306,14 +4283,56 @@ int run_iter_bw(struct pingpong_context *ctx,struct perftest_parameters *user_pa
 		gap_cycles = cpu_mhz * gap_time;
 	}
 
-	gap_deadline = get_cycles();
-
-	/* After the duration alarm above, so t0 is the alarm origin and the
-	 * parser can locate perftest's own [margin, duration - margin] window. */
-	if (qptrace_init(ctx, user_param, num_of_qps) == FAILURE) {
+	/* Everything that can take time is done above this line: get_cpu_mhz()
+	 * busy-waits 219 ms and the trace buffer is faulted in page by page.
+	 * Both used to run after the duration alarm was armed - and, with
+	 * --start_at, after the release deadline had passed - so the first
+	 * packet left hundreds of milliseconds late while the clock was
+	 * already running. */
+	if (qptrace_prepare(ctx, user_param, num_of_qps) == FAILURE) {
 		return_value = FAILURE;
 		goto cleaning;
 	}
+
+	/* --start_at: everything is connected; hold the first packet until the
+	 * requested absolute time so that several flows can join in lockstep */
+	if (user_param->start_at > 0) {
+		struct timespec ts;
+		ts.tv_sec = (time_t)user_param->start_at;
+		ts.tv_nsec = (long)((user_param->start_at - (double)ts.tv_sec) * 1e9);
+		while (clock_nanosleep(CLOCK_REALTIME, TIMER_ABSTIME, &ts, NULL) == EINTR)
+			;
+	}
+
+	if (user_param->test_type == DURATION) {
+		duration_param=user_param;
+		duration_param->state = START_STATE;
+		signal(SIGALRM, catch_alarm);
+		if (user_param->margin > 0 )
+			alarm(user_param->margin);
+		else
+			catch_alarm(0); /* move to next state */
+
+		user_param->iters = 0;
+	}
+
+	/* Will be 0, in case of Duration (look at force_dependencies or in the exp above). */
+	tot_iters = (uint64_t)user_param->iters*num_of_qps;
+
+	if (user_param->test_type == DURATION && user_param->state != START_STATE && user_param->margin > 0) {
+		fprintf(stderr, "Failed: margin is not long enough (taking samples before warmup ends)\n");
+		fprintf(stderr, "Please increase margin or decrease tx_depth\n");
+		return_value = FAILURE;
+		goto cleaning;
+	}
+
+	if (user_param->test_type == ITERATIONS && user_param->noPeak == ON)
+		user_param->tposted[0] = get_cycles();
+
+	gap_deadline = get_cycles();
+
+	/* Immediately after the duration alarm, so t0 is the alarm origin. */
+	qptrace_start();
 
 	/* main loop for posting */
 	while (totscnt < tot_iters  || totccnt < tot_iters ||

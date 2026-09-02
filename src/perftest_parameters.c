@@ -653,6 +653,8 @@ static void usage(const char *argv0, VerbType verb, TestType tst, int connection
 	if (tst != FS_RATE) {
 		printf("      --tclass=<value> ");
 		printf(" Set the Traffic Class in GRH (if GRH is in use)\n");
+		printf("      --start_at=<unix time> ");
+		printf(" Connect, then wait until this absolute wall-clock time (float seconds) before sending the first packet\n");
 
 		if (connection_type != RawEth) {
 			printf("      --flow_label=<fl0,fl1,fl2,...> ");
@@ -927,6 +929,7 @@ static void init_perftest_params(struct perftest_parameters *user_param)
 	user_param->use_rss		= OFF;
 	user_param->srq_exists		= OFF;
 	user_param->duration		= DEF_DURATION;
+	user_param->start_at		= 0;
 	user_param->margin		= DEF_INIT_MARGIN;
 	user_param->test_type		= ITERATIONS;
 	user_param->state		= START_STATE;
@@ -2731,6 +2734,7 @@ int parser(struct perftest_parameters *user_param,char *argv[], int argc)
 	static int mr_per_qp_flag = 0;
 	static int dlid_flag = 0;
 	static int tclass_flag = 0;
+	static int start_at_flag = 0;
 	static int wait_destroy_flag = 0;
 	static int flows_flag = 0;
 	static int flows_burst_flag = 0;
@@ -2933,6 +2937,7 @@ int parser(struct perftest_parameters *user_param,char *argv[], int argc)
 			{.name = "mr_per_qp", .has_arg = 0, .flag = &mr_per_qp_flag, .val = 1},
 			{.name = "dlid", .has_arg = 1, .flag = &dlid_flag, .val = 1},
 			{.name = "tclass", .has_arg = 1, .flag = &tclass_flag, .val = 1},
+			{.name = "start_at", .has_arg = 1, .flag = &start_at_flag, .val = 1},
 			{.name = "wait_destroy", .has_arg = 1, .flag = &wait_destroy_flag, .val = 1},
 			{.name = "flows", .has_arg = 1, .flag = &flows_flag, .val = 1},
 			{.name = "flows_burst", .has_arg = 1, .flag = &flows_burst_flag, .val = 1},
@@ -3590,6 +3595,10 @@ int parser(struct perftest_parameters *user_param,char *argv[], int argc)
 				if (tclass_flag) {
 					CHECK_VALUE(user_param->traffic_class,uint16_t,"traffic class",not_int_ptr);
 					tclass_flag = 0;
+				}
+				if (start_at_flag) {
+					user_param->start_at = strtod(optarg, NULL);
+					start_at_flag = 0;
 				}
 				if (wait_destroy_flag) {
 					CHECK_VALUE(user_param->wait_destroy,uint32_t,"wait_destroy",not_int_ptr);

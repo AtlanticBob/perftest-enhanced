@@ -126,19 +126,26 @@ struct qptrace_state {
 
 extern struct qptrace_state qptrace;
 
-/* Called once at the top of the bw loop, after the QPs exist. t0_tsc is
- * stamped here and is NOT the duration alarm's origin - init runs a few
- * hundred ms after the alarm is armed, mostly in get_cpu_mhz(). So the
- * sample window is not derivable from margin/duration; dump reads the
- * timestamps catch_alarm() left in tposted[0]/tcompleted[0] instead, which
- * are in this same clock. Measured: the nominal window was off by 415 ms,
- * worth 1.6% of the reported average on a flow that steps rate near an
- * edge. Returns 0 on success, and leaves mode == QPTRACE_OFF when tracing
- * was not requested. */
+/* Setup is split in two because everything slow has to happen before the
+ * run's clock starts. prepare() measures the CPU clock (get_cpu_mhz busy-
+ * waits 219 ms), allocates the trace buffer and faults in every page of it;
+ * it is called before the duration alarm is armed and before --start_at
+ * releases the first packet. start() only stamps t0, and is called
+ * immediately after the alarm, so t0 is the alarm's origin to within
+ * microseconds.
+ *
+ * dump() still reports the sample window from the timestamps catch_alarm()
+ * left in tposted[0]/tcompleted[0] rather than from margin/duration: those
+ * are in this same clock and carry however late the SIGALRM actually
+ * landed, which margin/duration cannot.
+ *
+ * prepare() returns 0 on success and leaves mode == QPTRACE_OFF when
+ * tracing was not requested; start() is then a no-op. */
 struct pingpong_context;
 struct perftest_parameters;
-int qptrace_init(struct pingpong_context *ctx,
-		 struct perftest_parameters *user_param, int num_of_qps);
+int qptrace_prepare(struct pingpong_context *ctx,
+		    struct perftest_parameters *user_param, int num_of_qps);
+void qptrace_start(void);
 
 /* Write the CSV and free. Safe to call when tracing is off. */
 void qptrace_dump(void);

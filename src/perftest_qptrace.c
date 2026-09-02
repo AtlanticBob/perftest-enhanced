@@ -50,8 +50,8 @@ static uint64_t realtime_ns(void)
 	return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
 }
 
-int qptrace_init(struct pingpong_context *ctx,
-		 struct perftest_parameters *user_param, int num_of_qps)
+int qptrace_prepare(struct pingpong_context *ctx,
+		    struct perftest_parameters *user_param, int num_of_qps)
 {
 	struct qptrace_state *q = &qptrace;
 	uint64_t budget, row_bytes;
@@ -127,10 +127,19 @@ int qptrace_init(struct pingpong_context *ctx,
 		memset(q->bin_ccnt, 0,
 		       q->cap * (uint64_t)num_of_qps * sizeof(uint64_t));
 
+	return SUCCESS;
+}
+
+void qptrace_start(void)
+{
+	struct qptrace_state *q = &qptrace;
+
+	if (q->mode == QPTRACE_OFF)
+		return;
+
 	q->t0_real_ns = realtime_ns();
 	q->t0_tsc = get_cycles();
 	q->next_tsc = q->t0_tsc + q->period_cyc;
-	return SUCCESS;
 }
 
 static void qptrace_write_header(FILE *f)
