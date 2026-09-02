@@ -3418,6 +3418,44 @@ static int ctx_modify_qp_to_rts(struct ibv_qp *qp,
 /******************************************************************************
  *
  ******************************************************************************/
+/* Did the device actually take the hardware rate limit on QP i? If not,
+ * fall back to the software limiter. Lifted out of the serial connect loop
+ * so the threaded path can run it after its pool has joined: the fallback
+ * writes user_param->rate_limit_type, which must not happen from several
+ * workers at once. Upstream behaviour is unchanged, including that the
+ * fallback is announced once - the first QP to fall back clears
+ * HW_RATE_LIMIT, so the callers stop asking. */
+static int ctx_hw_rate_limit_taken(struct pingpong_context *ctx,
+				   struct perftest_parameters *user_param, int i)
+{
+	struct ibv_qp_attr qp_attr;
+	struct ibv_qp_init_attr init_attr;
+	int err, qp_static_rate = 0;
+
+	memset(&qp_attr, 0, sizeof(struct ibv_qp_attr));
+	memset(&init_attr, 0, sizeof(struct ibv_qp_init_attr));
+
+	err = ibv_query_qp(ctx->qp[i], &qp_attr, IBV_QP_AV, &init_attr);
+	if (err)
+		fprintf(stderr, "ibv_query_qp failed to get ah_attr\n");
+	else
+		qp_static_rate = (int)(qp_attr.ah_attr.static_rate);
+
+	//- Fall back to SW Limit only if flag undefined
+	if (err ||
+	    qp_static_rate != user_param->valid_hw_rate_limit_index ||
+	    user_param->link_type != IBV_LINK_LAYER_INFINIBAND) {
+		if (!user_param->is_rate_limit_type) {
+			user_param->rate_limit_type = SW_RATE_LIMIT;
+			fprintf(stderr, "\x1b[31mThe QP failed to accept HW rate limit, providing SW rate limit \x1b[0m\n");
+		} else {
+			fprintf(stderr, "\x1b[31mThe QP failed to accept HW rate limit  \x1b[0m\n");
+			return FAILURE;
+		}
+	}
+	return SUCCESS;
+}
+
 static int job_connect_qp(struct setup_job *j, int i)
 {
 	struct perftest_parameters *user_param = j->user_param;
@@ -3466,11 +3504,16 @@ int ctx_connect(struct pingpong_context *ctx,
 	if((user_param->use_xrc || user_param->connection_type == DC) && (user_param->duplex || user_param->tst == LAT)) {
 		xrc_offset = user_param->num_of_qps / 2;
 	}
-	/* xrc_offset below is carried across iterations, so XRC and DC keep
-	 * the serial loop. Plain RC - which is what a large -q means - has no
-	 * cross-iteration state and is handed to the thread pool. */
-	if (!user_param->use_xrc && user_param->connection_type != DC) {
+	/* Only RC and UC take the thread pool. xrc_offset below is carried
+	 * across iterations, so XRC and DC need the serial loop; UD and SRD
+	 * need the address handle the serial loop creates from the ah_attr
+	 * that ctx_modify_qp_to_rtr leaves on the stack, which a worker
+	 * cannot hand back. RC - which is what a large -q means - has neither
+	 * and is the case the pool exists for. */
+	if ((user_param->connection_type == RC || user_param->connection_type == UC) &&
+	    !user_param->use_xrc) {
 		struct setup_job proto;
+		int rc;
 
 		memset(&proto, 0, sizeof proto);
 		proto.ctx = ctx;
@@ -3478,7 +3521,16 @@ int ctx_connect(struct pingpong_context *ctx,
 		proto.fn = job_connect_qp;
 		proto.dest = dest;
 		proto.my_dest = my_dest;
-		return run_setup_range(&proto, 0, user_param->num_of_qps);
+		rc = run_setup_range(&proto, 0, user_param->num_of_qps);
+		if (rc != SUCCESS)
+			return rc;
+
+		for (i = 0; i < user_param->num_of_qps &&
+			    user_param->rate_limit_type == HW_RATE_LIMIT; i++) {
+			if (ctx_hw_rate_limit_taken(ctx, user_param, i) == FAILURE)
+				return FAILURE;
+		}
+		return SUCCESS;
 	}
 
 	for (i=0; i < user_param->num_of_qps; i++) {
@@ -3534,31 +3586,8 @@ int ctx_connect(struct pingpong_context *ctx,
 		}
 
 		if (user_param->rate_limit_type == HW_RATE_LIMIT) {
-			struct ibv_qp_attr qp_attr;
-			struct ibv_qp_init_attr init_attr;
-			int err, qp_static_rate = 0;
-
-			memset(&qp_attr,0,sizeof(struct ibv_qp_attr));
-			memset(&init_attr,0,sizeof(struct ibv_qp_init_attr));
-
-			err = ibv_query_qp(ctx->qp[i], &qp_attr, IBV_QP_AV, &init_attr);
-			if (err)
-				fprintf(stderr, "ibv_query_qp failed to get ah_attr\n");
-			else
-				qp_static_rate = (int)(qp_attr.ah_attr.static_rate);
-
-			//- Fall back to SW Limit only if flag undefined
-			if(err ||
-			   qp_static_rate != user_param->valid_hw_rate_limit_index ||
-			   user_param->link_type != IBV_LINK_LAYER_INFINIBAND) {
-				if(!user_param->is_rate_limit_type) {
-					user_param->rate_limit_type = SW_RATE_LIMIT;
-					fprintf(stderr, "\x1b[31mThe QP failed to accept HW rate limit, providing SW rate limit \x1b[0m\n");
-				} else {
-					fprintf(stderr, "\x1b[31mThe QP failed to accept HW rate limit  \x1b[0m\n");
-					return FAILURE;
-				}
-			}
+			if (ctx_hw_rate_limit_taken(ctx, user_param, i) == FAILURE)
+				return FAILURE;
 		}
 
 		if((user_param->use_xrc || user_param->connection_type == DC) && (user_param->duplex || user_param->tst == LAT))

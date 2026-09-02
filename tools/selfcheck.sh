@@ -161,5 +161,14 @@ except ValueError: print(0)")" \
       "every slow step must run before the deadline, not after it"
 
 echo
+echo "rate limit through the threaded connect"
+run "-s 8192 -q 4 -D 6 --report_gbits" "--rate_limit=5"
+r=$(reported)
+check "$(close "$r" 5 0.05)" "--rate_limit=5 delivers ${r:-?} Gb/s" \
+      "on RoCE the hardware limiter is refused, so the fall-back to the software one must survive the parallel setup path"
+check "$(grep -q 'providing SW rate limit' "$TMP/cli.err" && echo 1 || echo 0)" \
+      "  and the fall-back is announced, not silent"
+
+echo
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" = 0 ] || exit 1

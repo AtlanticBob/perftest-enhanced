@@ -157,8 +157,10 @@ the same dual-license notice.
 4. `--report-per-qp` is supported in the bandwidth tests, client side only,
    and is rejected together with `-a` or `--run_infinitely`.
 
-5. `--setup-threads` is ignored for XRC and DC connections, and below 8 QPs;
-   the serial path is used instead.
+5. `--setup-threads` applies to RC and UC only, and to runs of at least 8
+   QPs; XRC, DC, UD and SRD use the serial path. XRC and DC carry state
+   across the connect loop, and UD and SRD need an address handle built from
+   a value that only lives on the serial loop's stack.
 
 6. The trace is the sender's completion curve. An RDMA write completes when
    its ACK returns, with `tx_depth` messages in flight, so it can lag the
@@ -169,7 +171,13 @@ the same dual-license notice.
    per direction whose size is `tx_depth × num_of_qps` and must fit the
    device's `max_cqe`. See item 10 of the upstream notes below.
 
-8. `-R` (rdma_cm) resolves the RDMA device from the IP address, so it needs
+8. `--rate_limit` without `--rate_limit_type` asks the device for a hardware
+   limit first and falls back to the software limiter when the device
+   refuses, which is what happens on RoCE. The fall-back is announced on
+   stderr. Verify the limit actually took effect — a run reporting line rate
+   when you asked for less means neither limiter is engaged.
+
+9. `-R` (rdma_cm) resolves the RDMA device from the IP address, so it needs
    the device to be identifiable that way. On RoCE virtual functions that
    report a zero `node_guid` it can fail to find one. Assigning the VFs real
    GUIDs fixes it; this is an rdma-core matching issue, not a perftest one.
